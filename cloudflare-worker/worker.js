@@ -81,6 +81,22 @@ export default {
       );
     }
 
+    // 3b. Page d'application publique (fichier unique, servie aussi par GitHub Pages)
+    if (url.pathname === "/app" || url.pathname === "/app/") {
+      try {
+        const resApp = await fetch("https://raw.githubusercontent.com/JeanHug/AI-OS/main/app/index.html", {
+          headers: { "User-Agent": "Cloudflare-AI-OS" },
+          cf: { cacheTtl: 300, cacheEverything: true },
+        });
+        if (resApp.ok) {
+          return new Response(await resApp.text(), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" },
+          });
+        }
+      } catch (e) {}
+      return new Response("Application indisponible.", { status: 502, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+
     // 4. Extraction & Validation de l'Authentification
     let userPassword = url.searchParams.get("password") || url.searchParams.get("pin");
     
@@ -147,6 +163,24 @@ export default {
     }
 
     const linuxPrimaryUrl = linuxTunnel?.cloudflare || linuxTunnel?.primary || linuxTunnel?.lhrLife || null;
+
+    // 5b. Délivrance du jeton d'accès au bureau (utilisé par la page d'application)
+    if (url.pathname === "/grant" || url.pathname === "/api/grant") {
+      if (!env.VM_API_TOKEN) {
+        return new Response(JSON.stringify({ ok: false, error: "VM_API_TOKEN absent du Worker" }), {
+          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      if (!linuxPrimaryUrl) {
+        return new Response(JSON.stringify({ ok: false, error: "Le bureau n'est pas encore disponible (tunnel absent)." }), {
+          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      const grant = await signDesktopGrant(env.VM_API_TOKEN);
+      return new Response(JSON.stringify({ ok: true, url: `${linuxPrimaryUrl}/?s=${grant}`, expires_in: 14400 }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+      });
+    }
 
     // 6. Lien interactif : ouverture du bureau (jeton signé à usage temporaire)
     const target = url.searchParams.get("target")?.toLowerCase();
@@ -279,6 +313,8 @@ export default {
         error: `Point de terminaison non reconnu : ${url.pathname}`,
         available_endpoints: [
           "/docs",
+          "/app",
+          "/grant",
           "/api/health",
           "/api/tunnels",
           "/api/linux/status",

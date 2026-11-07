@@ -107,18 +107,19 @@ avant déchiffrement. Génération unique : la branche est réécrite à chaque 
 
 ## Bureau interactif
 
-L'URL du tunnel cloudflared est **le lien interactif** : ouverte dans un
-navigateur, elle affiche le bureau XFCE de la VM (noVNC), pilotable à la
-souris et au clavier. Pas d'API à cette adresse.
+**`app/index.html`** est l'unique porte d'entrée, déployée à deux endroits :
+GitHub Pages (`jeanhug.github.io/AI-OS/app/`) et le Worker (`/app`).
+Page blanche, un seul champ : le code d'accès. Aucun mot de passe n'est écrit
+dans le code source — le code est vérifié par le Worker (`POST /grant`), qui
+répond par un jeton signé HMAC valable 4 h et renvoie vers le bureau.
 
-- **Voie normale** : `https://ai-os.hugdu77777.workers.dev/?target=linux`
-  (code PIN demandé) → redirection automatique vers le bureau avec un jeton
-  signé valable 4 h, mémorisé par cookie.
-- **Voie directe** : l'URL du tunnel (publiée dans `/api/tunnels`) affiche une
-  page d'accès si le navigateur n'a pas encore d'autorisation.
+- `app/` → le code → redirection vers le tunnel **avec** le jeton signé → bureau.
+- L'URL du tunnel ouverte **sans** autorisation → redirection vers `app/`.
+- Le navigateur mémorise l'accès (cookie) : 4 h d'utilisation directe.
+- L'API d'interaction reste derrière le Worker `ai-os` (Bearer), jamais exposée
+  comme interface.
 
-Le reste — l'API d'interaction — passe uniquement par le **Worker `ai-os`**,
-authentifié par le PIN, qui relaye vers le pont derrière le tunnel.
+Le code d'accès vit uniquement dans le secret `PASS` du Worker.
 
 ## API d'interaction (pont, auth `Bearer VM_API_TOKEN`)
 

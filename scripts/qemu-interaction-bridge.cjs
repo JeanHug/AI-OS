@@ -97,31 +97,7 @@ function desktopAuthorized(req) {
   return false;
 }
 
-const LOGIN_PAGE = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI OS — Bureau</title>
-<style>
-  body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#fff;color:#111827;
-       display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-  .box{width:320px;text-align:center}
-  h1{font-size:20px;font-weight:600;margin:0 0 6px}
-  p{color:#6b7280;font-size:13px;line-height:1.5;margin:0 0 18px}
-  input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;
-        box-sizing:border-box;margin-bottom:10px}
-  button{width:100%;padding:10px;border:0;border-radius:8px;background:#2563eb;color:#fff;
-         font-size:14px;font-weight:600;cursor:pointer}
-  a{color:#2563eb;text-decoration:none}
-</style></head><body>
-<div class="box">
-  <h1>AI OS — Bureau</h1>
-  <p>Pour ouvrir le bureau interactif, passez par le portail avec votre code&nbsp;:<br>
-  <a href="https://ai-os.hugdu77777.workers.dev/?target=linux">ai-os.hugdu77777.workers.dev/?target=linux</a></p>
-  <form method="GET" action="/">
-    <input type="password" name="tok" placeholder="Jeton d'accès (usage avancé)" autocomplete="off">
-    <button type="submit">Ouvrir le bureau</button>
-  </form>
-</div></body></html>`;
+const APP_URL = process.env.AIOS_APP_URL || 'https://jeanhug.github.io/AI-OS/app/';
 
 // ---------------------------------------------------------------------------
 // Commandes invitées via ssh + stdin (aucun shell côté runner)
@@ -385,8 +361,9 @@ const server = http.createServer(async (req, res) => {
     // 1. Bureau interactif (/, et les assets noVNC)
     if (path === '/' || !path.startsWith('/api/')) {
       if (!desktopAuthorized(req)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-        return res.end(LOGIN_PAGE);
+        // Sans autorisation : retour à la page d'application (authentification).
+        res.writeHead(302, { Location: APP_URL, 'Cache-Control': 'no-store' });
+        return res.end();
       }
       if (path === '/') {
         res.writeHead(302, { Location: '/vnc.html?autoconnect=true&resize=scale&path=websockify', 'Set-Cookie': grantCookie(req) });
