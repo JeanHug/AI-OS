@@ -40,7 +40,7 @@ start_vm first
 
 started=0
 for _ in $(seq 1 180); do
-  if ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "test -f $AIOS_KERNEL_MARKER" 2>/dev/null; then started=1; break; fi
+  if aios_guest_ssh sshopts 20 "test -f $AIOS_KERNEL_MARKER" 2>/dev/null; then started=1; break; fi
   kill -0 "$qemu_pid" 2>/dev/null || break
   sleep 10
 done
@@ -49,7 +49,7 @@ wait "$qemu_pid" || true
 
 start_vm second
 for _ in $(seq 1 120); do
-  if ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then
+  if aios_guest_ssh sshopts 20 "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then
     aios_log "Validation réussie : Ubuntu 26.10 avec noyau $AIOS_KERNEL_VERSION"
     exit 0
   fi

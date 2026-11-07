@@ -41,7 +41,7 @@ sshopts=(); aios_ssh_options sshopts "$work/key" "$work/known_hosts"
 # arrête QEMU ; on relance pour basculer sur le noyau 7.3.1).
 started=0
 for _ in $(seq 1 180); do
-  if ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "test -f $AIOS_KERNEL_MARKER" 2>/dev/null; then started=1; break; fi
+  if aios_guest_ssh sshopts 20 "test -f $AIOS_KERNEL_MARKER" 2>/dev/null; then started=1; break; fi
   kill -0 "$qemu_pid" 2>/dev/null || break
   sleep 10
 done
@@ -55,7 +55,7 @@ qemu_pid=$!
 
 ready=0
 for _ in $(seq 1 120); do
-  if ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then
+  if aios_guest_ssh sshopts 20 "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then
     ready=1; break
   fi
   kill -0 "$qemu_pid" 2>/dev/null || aios_die 'QEMU arrêté prématurément'

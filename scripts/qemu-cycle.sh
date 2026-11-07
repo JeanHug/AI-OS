@@ -84,7 +84,7 @@ monitor_loop() {
     fi
     if (( elapsed - last_beat >= 60 )); then
       last_beat=$elapsed
-      local up; up=$(ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" 'uptime -p' 2>/dev/null || echo 'invité muet')
+      local up; up=$(aios_guest_ssh sshopts 30 'uptime -p' 2>/dev/null || echo 'invité muet')
       aios_log "[$label +$((elapsed / 60))m] service actif — VM : $up"
     fi
     (( elapsed >= duration )) && break
@@ -154,7 +154,7 @@ boot)
   fi
   ready=0
   for _ in $(seq 1 120); do
-    if ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then ready=1; break; fi
+    if aios_guest_ssh sshopts 15 "test -f $AIOS_KERNEL_MARKER && . /etc/os-release && test \"\$VERSION_ID\" = 26.10 && uname -r | grep -q \"^${AIOS_KERNEL_ABBREV//./\\.}\"" 2>/dev/null; then ready=1; break; fi
     pid_alive "$(file_pid qemu.pid)" || aios_die "QEMU arrêté prématurément."
     sleep 5
   done
@@ -249,7 +249,7 @@ overlap)
 
 stop)
   aios_log "Auto-arrêt : arrêt propre de l'invité avant sauvegarde chiffrée."
-  ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" 'sudo sync && sudo shutdown -h now' || true
+  aios_guest_ssh sshopts 60 'sudo sync && sudo shutdown -h now' || true
   stopped=0
   for _ in $(seq 1 120); do
     pid_alive "$(file_pid qemu.pid)" || { stopped=1; break; }

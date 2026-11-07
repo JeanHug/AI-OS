@@ -97,33 +97,11 @@ aios_guest_packages() {
     python3 git
 }
 
-# Installation idempotente du bureau et des outils d'interaction.
-# $1 = nom du tableau d'options SSH (nameref).
-aios_guest_ensure_desktop() {
-  local -n _sshopts=$1
-  local missing
-  missing=$(ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" \
-    'for t in startxfce4 Xvfb scrot xdotool xclip wmctrl import; do command -v "$t" >/dev/null || echo "$t"; done' 2>/dev/null || echo "ssh-indisponible")
-  if [[ -z "$missing" ]]; then
-    aios_log "Bureau et outils déjà installés — rien à faire."
-    return 0
-  fi
-  aios_log "Manquants : $(echo "$missing" | tr '\n' ' ') — installation..."
-  local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
-  ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ${pkgs[*]}" \
-    || ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "sudo apt-get install -y --no-install-recommends ${pkgs[*]}" \
-    || return 1
-}
-
-# Démarrage idempotent du bureau X (Xvfb + XFCE).
-aios_guest_start_desktop() {
-  local -n _sshopts=$1
-  ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" \
-    "pgrep -x Xvfb >/dev/null || nohup Xvfb $AIOS_GUEST_DISPLAY -screen 0 $AIOS_GUEST_RESOLUTION >/tmp/aios-xvfb.log 2>&1 </dev/null & pgrep -x xfce4-session >/dev/null || nohup env DISPLAY=$AIOS_GUEST_DISPLAY xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null &"
-}
 
 # ---------------------------------------------------------------------------
-# SSH vers l'invité
+# SSH vers l'invité — TOUTES les commandes invitées passent par aios_guest_ssh,
+# bornées par timeout : un canal SSH qui reste ouvert ne peut jamais bloquer
+# une étape du workflow.
 # ---------------------------------------------------------------------------
 aios_ssh_options() {
   local -n _out=$1
@@ -136,6 +114,56 @@ aios_ssh_options() {
     -o ServerAliveInterval=15
     -p "$AIOS_SSH_PORT"
   )
+}
+
+# Usage : aios_guest_ssh <nom-tableau-sshopts> <secondes-max> <commande>
+aios_guest_ssh() {
+  local _name=$1 _secs=$2
+  shift 2
+  local -n _arr=$_name
+  timeout --signal=TERM "$_secs" ssh "${_arr[@]}" "$AIOS_GUEST_USER@127.0.0.1" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Installation idempotente du bureau et des outils d'interaction.
+# Attends la fin de cloud-init (qui tient le verrou dpkg au démarrage) puis
+# installe ce qui manque, avec attente bornée du verrou dpkg.
+# $1 = nom du tableau d'options SSH.
+# ---------------------------------------------------------------------------
+aios_guest_ensure_desktop() {
+  # 1. cloud-init a-t-il fini ? (il tient le verrou dpkg pendant son travail)
+  aios_log "Attente de la fin de cloud-init dans l'invité..."
+  aios_guest_ssh "$1" 300 'cloud-init status --wait 2>/dev/null || true' || aios_warn "cloud-init non confirmé : on continue."
+
+  # 2. que manque-t-il ?
+  local missing
+  missing=$(aios_guest_ssh "$1" 30 'for t in startxfce4 Xvfb scrot xdotool xclip wmctrl import; do command -v "$t" >/dev/null || echo "$t"; done' 2>/dev/null || echo "ssh-indisponible")
+  if [[ -z "$missing" ]]; then
+    aios_log "Bureau et outils déjà installés — rien à faire."
+    return 0
+  fi
+  aios_log "Manquants : $(echo "$missing" | tr '\n' ' ') — installation..."
+
+  # 3. installation avec attente bornée du verrou dpkg (jamais de blocage).
+  local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
+  local install_cmd="sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${pkgs[*]}"
+  aios_guest_ssh "$1" 420 "$install_cmd" && return 0
+
+  # 4. seconde chance : rafraîchir les index, puis réessayer.
+  aios_warn "Première tentative d'installation échouée : mise à jour des index puis nouvel essai."
+  aios_guest_ssh "$1" 300 'sudo apt-get update -qq -o DPkg::Lock::Timeout=300' || true
+  aios_guest_ssh "$1" 420 "$install_cmd" && return 0
+  return 1
+}
+
+# Démarrage idempotent du bureau X (Xvfb + XFCE), un daemon par appel, chacun
+# détaché (setsid) et borné : impossible de bloquer l'étape.
+aios_guest_start_desktop() {
+  local d="$AIOS_GUEST_DISPLAY" r="$AIOS_GUEST_RESOLUTION"
+  aios_guest_ssh "$1" 30 "command -v Xvfb >/dev/null || exit 0; pgrep -x Xvfb >/dev/null && exit 0; setsid nohup Xvfb $d -screen 0 $r >/tmp/aios-xvfb.log 2>&1 </dev/null & exit 0" \
+    || aios_warn "Xvfb non démarré."
+  aios_guest_ssh "$1" 30 "command -v xfce4-session >/dev/null || exit 0; pgrep -x xfce4-session >/dev/null && exit 0; setsid nohup env DISPLAY=$d xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null & exit 0" \
+    || aios_warn "XFCE non démarré."
 }
 
 # ---------------------------------------------------------------------------
