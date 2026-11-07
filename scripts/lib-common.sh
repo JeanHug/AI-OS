@@ -177,10 +177,13 @@ aios_guest_ensure_stream() {
 # l'affichage :99, boucle locale) + websockify/noVNC (port 6080, boucle locale).
 # N'est joignable que par le forward SSH du runner.
 aios_guest_start_stream() {
-  aios_guest_ssh "$1" 30 "command -v x11vnc >/dev/null && command -v websockify >/dev/null || exit 0
-pgrep -x x11vnc >/dev/null || setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null &
-pgrep -f websockify >/dev/null || setsid nohup websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null &
-exit 0" || aios_warn "Flux bureau non démarré dans l'invité."
+  # Un service par appel, sur le patron de aios_guest_start_desktop (prouvé).
+  # Astuce du crochet : '[w]ebsockify' ne peut pas matcher la ligne de commande
+  # de pgrep elle-même (le piège classique du pgrep -f).
+  aios_guest_ssh "$1" 20 "command -v x11vnc >/dev/null || exit 0; pgrep -x x11vnc >/dev/null && exit 0; setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null & exit 0" \
+    || aios_warn "x11vnc non démarré dans l'invité."
+  aios_guest_ssh "$1" 20 "command -v websockify >/dev/null || exit 0; pgrep -f '[w]ebsockify' >/dev/null && exit 0; setsid nohup websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null & exit 0" \
+    || aios_warn "websockify non démarré dans l'invité."
 }
 
 # Démarrage idempotent du bureau X (Xvfb + XFCE), un daemon par appel, chacun
