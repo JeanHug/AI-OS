@@ -24,7 +24,7 @@ qemu-img resize disk.img "$AIOS_DISK_SIZE"
 
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
 pub=$(cat "$work/key.pub")
-aios_write_cloudinit "$pub" "$AIOS_INSTANCE_ID_VALIDATION" minimal
+aios_write_cloudinit "$pub" "$AIOS_INSTANCE_ID"
 cloud-localds seed.img user-data meta-data
 
 start_vm() {

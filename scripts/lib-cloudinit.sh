@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # lib-cloudinit.sh — génération du seed cloud-init (user-data + meta-data).
 #
-# Unique source du cloud-init des trois chemins QEMU (durable, live, validation).
-# Le noyau est installé par un script séparé écrit via write_files : aucune
-# citation YAML imbriquée, aucun échappement fragile.
+# Le cloud-init reste VOLONTAIREMENT minime : utilisateur + clé SSH, règle
+# polkit, script de noyau verrouillé par marqueur. Aucune installation de
+# paquets lourds ici — la ré-exécution par instance doit coûter quelques
+# secondes, et les paquets sont gérés par l'étape « install-desktop ».
 #
-# Usage : aios_write_cloudinit <clé-pub-ssh> <instance-id> <mode>
-#   mode = full      → bureau XFCE + outils d'interaction
-#          minimal   → validation seule (pas de bureau)
+# Usage : aios_write_cloudinit <clé-pub-ssh> <instance-id>
 # Écrit user-data et meta-data dans le répertoire courant.
 
 aios_write_cloudinit() {
-  local pub=$1 iid=$2 mode=$3
+  local pub=$1 iid=$2
   local kscript
   kscript="$(mktemp)"
 
@@ -67,16 +66,10 @@ EOF
         var allowed = ["org.freedesktop.color-manager.create-device", "org.freedesktop.color-manager.create-profile", "org.freedesktop.color-manager.modify-device", "org.freedesktop.color-manager.modify-profile"];
         if (subject.user === "aios" && allowed.indexOf(action.id) !== -1) return polkit.Result.YES;
       });
-package_update: true
 packages:
-EOF
-    if [[ "$mode" == full ]]; then
-      local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
-    else
-      local -a pkgs=(openssh-server curl ca-certificates)
-    fi
-    printf '  - %s\n' "${pkgs[@]}"
-    cat <<'EOF'
+  - openssh-server
+  - curl
+  - ca-certificates
 runcmd:
   - [bash, /root/aios-install-kernel.sh]
 EOF

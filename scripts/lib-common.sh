@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# lib-common.sh — constantes et fonctions partagées par tous les scripts QEMU de AI OS.
-#
-# Ce fichier est la seule source de vérité pour : l'image Ubuntu, le noyau,
-# les paquets, les identifiants de la VM, les paramètres QEMU et les timings.
-# Aucune de ces valeurs ne doit être recopiée dans un autre script.
+# lib-common.sh — constantes et fonctions partagées par les scripts QEMU de AI OS.
 #
 # Usage : source "$(dirname "${BASH_SOURCE[0]}")/lib-common.sh"
 
@@ -28,29 +24,23 @@ AIOS_TUNNEL_BRANCH="${AIOS_TUNNEL_BRANCH:-tunnel-url}"
 AIOS_TUNNEL_FILE="${AIOS_TUNNEL_FILE:-tunnels-linux.json}"
 
 # ---------------------------------------------------------------------------
-# QEMU — valeurs par défaut, surchargeables par variable d'environnement
+# QEMU — surchargeables par variable d'environnement
 # ---------------------------------------------------------------------------
-# AIOS_QEMU_CPU : modèle de CPU exposé au guest.
-#
-# « host » reproduit le modèle exact du processeur physique du runner. Les
-# runners GitHub ne sont pas homogènes : un checkpoint créé sur un runner peut
-# être restauré sur un autre, avec un CPU différent. Passer à un modèle nommé
-# stable rend l'image portable, mais DOIT être validé avant mise en production
-# car un modèle non supporté par l'hôte empêche QEMU de démarrer.
-# Validation : lancer le workflow « qemu-validation » avec AIOS_QEMU_CPU réglé
-# sur le modèle visé, puis basculer la valeur par défaut ici.
+# AIOS_QEMU_CPU : « host » reproduit le CPU du runner (rapide mais non
+# portable entre runners de générations différentes). Un modèle nommé stable
+# rendra les checkpoints portables — à valider avec le workflow de validation
+# AVANT de changer la valeur par défaut.
 AIOS_QEMU_CPU="${AIOS_QEMU_CPU:-host}"
 AIOS_QEMU_MACHINE="${AIOS_QEMU_MACHINE:-q35,accel=kvm}"
 AIOS_QEMU_MEM_MB="${AIOS_QEMU_MEM_MB:-3072}"
 AIOS_QEMU_SMP="${AIOS_QEMU_SMP:-2}"
-AIOS_DISK_SIZE="${AIOS_DISK_SIZE:-16G}"
 
 # ---------------------------------------------------------------------------
 # Invité
 # ---------------------------------------------------------------------------
 AIOS_GUEST_USER="${AIOS_GUEST_USER:-aios}"
+AIOS_GUEST_HOME="${AIOS_GUEST_HOME:-/home/aios}"
 AIOS_GUEST_DISPLAY="${AIOS_GUEST_DISPLAY:-:99}"
-AIOS_GUEST_RESOLUTION="${AIOS_GUEST_RESOLUTION:-1280x720x24}"
 AIOS_SSH_PORT="${AIOS_SSH_PORT:-22222}"
 AIOS_KERNEL_MARKER="/var/lib/aios-kernel-installed"
 
@@ -62,30 +52,10 @@ AIOS_BRIDGE_HOST="${AIOS_BRIDGE_HOST:-127.0.0.1}"
 CLOUDFLARED_URL="${CLOUDFLARED_URL:-https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64}"
 
 # ---------------------------------------------------------------------------
-# Timings du relais (secondes, mesurées depuis l'instant où la VM est prête)
+# État du cycle (partagé entre les étapes du workflow)
 # ---------------------------------------------------------------------------
-# AIOS_RELAY_TRIGGER_SECONDS : instant auquel le cycle suivant est déclenché.
-# AIOS_RELAY_SHUTDOWN_SECONDS : instant auquel l'invité est arrêté pour sauvegarde.
-# Le chevauchement est la différence entre les deux. Il doit rester supérieur à
-# AIOS_HANDOVER_BUDGET_SECONDS pour que le successeur ait le temps de restaurer
-# le checkpoint et de publier son tunnel avant la mort du prédécesseur.
-AIOS_RELAY_TRIGGER_SECONDS="${AIOS_RELAY_TRIGGER_SECONDS:-18000}"   # 5 h 00
-AIOS_RELAY_SHUTDOWN_SECONDS="${AIOS_RELAY_SHUTDOWN_SECONDS:-19800}" # 5 h 30 → chevauchement 30 min
-AIOS_HANDOVER_BUDGET_SECONDS="${AIOS_HANDOVER_BUDGET_SECONDS:-900}" # 15 min nécessaires au successeur
-
-# Budget total du job GitHub Actions, en secondes. La limite dure du runner est
-# de 6 h ; on garde une réserve pour l'arrêt propre et la sauvegarde.
-AIOS_JOB_BUDGET_SECONDS="${AIOS_JOB_BUDGET_SECONDS:-21600}"
-
-# Garde-fous de la sauvegarde
-# Espace disque libre minimal avant d'engager une sauvegarde, en ko.
-# La sauvegarde a besoin de : le disque vivant + les fragments chiffrés + le
-# dépôt git et ses objets. On exige 3,5 Go de marge.
-AIOS_MIN_FREE_KB="${AIOS_MIN_FREE_KB:-3670016}"
-
-# Intervalle de sauvegarde périodique — non utilisé tant que les deltas
-# incrémentaux ne sont pas implémentés ; réservé pour la suite.
-AIOS_PERIODIC_SAVE_SECONDS="${AIOS_PERIODIC_SAVE_SECONDS:-600}"
+AIOS_STATE_DIR="${AIOS_STATE_DIR:-${RUNNER_TEMP:-/tmp}/aios-cycle}"
+AIOS_WORK_DIR="$AIOS_STATE_DIR/work"
 
 # ---------------------------------------------------------------------------
 # Journalisation
@@ -94,7 +64,6 @@ aios_log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 aios_warn() { printf '[%s] AVERTISSEMENT : %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 aios_die()  { printf '[%s] ERREUR : %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 
-# Vérifie qu'une variable d'environnement est présente et non vide.
 aios_require_env() {
   local missing=0 name
   for name in "$@"; do
@@ -107,37 +76,55 @@ aios_require_env() {
 }
 
 # ---------------------------------------------------------------------------
-# KVM
+# KVM — obligatoire. Le repli silencieux en TCG est interdit partout.
 # ---------------------------------------------------------------------------
-# Exige l'accélération matérielle. Le repli silencieux en émulation TCG a déjà
-# coûté un run de 16 minutes : il est interdit partout.
 aios_require_kvm() {
   [[ -e /dev/kvm ]] || aios_die "/dev/kvm absent : ce runner ne fournit pas la virtualisation matérielle. Émulation TCG refusée."
   sudo chown "$(id -u):$(id -g)" /dev/kvm
   sudo chmod 660 /dev/kvm
-  [[ -r /dev/kvm && -w /dev/kvm ]] || aios_die "/dev/kvm présent mais inaccessible en lecture/écriture."
+  [[ -r /dev/kvm && -w /dev/kvm ]] || aios_die "/dev/kvm présent mais inaccessible."
   aios_log "Accélération KVM disponible."
 }
 
 # ---------------------------------------------------------------------------
-# Outillage invité
+# Paquets invités — installés par l'étape explicite « install-desktop »
+# (jamais par cloud-init : une ré-exécution cloud-init doit rester rapide).
 # ---------------------------------------------------------------------------
-# Outils X requis par le futur système d'interaction (souris, clavier,
-# presse-papier, fenêtres, captures). Le démon d'interaction en dépend.
 aios_guest_packages() {
   printf '%s\n' \
-    openssh-server curl ca-certificates \
     xfce4 xfce4-terminal xvfb scrot \
     xdotool xclip xsel autocutsel wmctrl x11-utils imagemagick \
-    python3 python3-pip git build-essential
+    python3 git
+}
+
+# Installation idempotente du bureau et des outils d'interaction.
+# $1 = nom du tableau d'options SSH (nameref).
+aios_guest_ensure_desktop() {
+  local -n _sshopts=$1
+  local missing
+  missing=$(ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" \
+    'for t in startxfce4 Xvfb scrot xdotool xclip wmctrl import; do command -v "$t" >/dev/null || echo "$t"; done' 2>/dev/null || echo "ssh-indisponible")
+  if [[ -z "$missing" ]]; then
+    aios_log "Bureau et outils déjà installés — rien à faire."
+    return 0
+  fi
+  aios_log "Manquants : $(echo "$missing" | tr '\n' ' ') — installation..."
+  local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
+  ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ${pkgs[*]}" \
+    || ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "sudo apt-get install -y --no-install-recommends ${pkgs[*]}" \
+    || return 1
+}
+
+# Démarrage idempotent du bureau X (Xvfb + XFCE).
+aios_guest_start_desktop() {
+  local -n _sshopts=$1
+  ssh "${_sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" \
+    "pgrep -x Xvfb >/dev/null || nohup Xvfb $AIOS_GUEST_DISPLAY -screen 0 $AIOS_GUEST_RESOLUTION >/tmp/aios-xvfb.log 2>&1 </dev/null & pgrep -x xfce4-session >/dev/null || nohup env DISPLAY=$AIOS_GUEST_DISPLAY xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null &"
 }
 
 # ---------------------------------------------------------------------------
 # SSH vers l'invité
 # ---------------------------------------------------------------------------
-# Construit le tableau d'options SSH. Usage :
-#   local -a opts; aios_ssh_options opts "$key" "$known_hosts"
-#   ssh "${opts[@]}" "$AIOS_GUEST_USER@127.0.0.1" '…'
 aios_ssh_options() {
   local -n _out=$1
   _out=(
@@ -154,8 +141,6 @@ aios_ssh_options() {
 # ---------------------------------------------------------------------------
 # Image Ubuntu
 # ---------------------------------------------------------------------------
-# Télécharge l'image cloud Ubuntu et vérifie sa somme SHA256.
-# $1 = répertoire de destination, $2 = nom du fichier image résultant
 aios_fetch_ubuntu_image() {
   local dest=$1 out=$2 sums
   sums="$(mktemp)"
@@ -165,3 +150,9 @@ aios_fetch_ubuntu_image() {
   rm -f "$sums"
   mv "$dest/$AIOS_UBUNTU_IMAGE" "$dest/$out"
 }
+
+# ---------------------------------------------------------------------------
+# Timestamps d'état
+# ---------------------------------------------------------------------------
+state_write() { mkdir -p "$AIOS_STATE_DIR"; printf '%s' "$2" > "$AIOS_STATE_DIR/$1"; }
+state_read()  { cat "$AIOS_STATE_DIR/$1" 2>/dev/null || true; }

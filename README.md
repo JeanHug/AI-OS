@@ -28,8 +28,9 @@ bureau distant.
 ```
 config/aios.conf                  valeurs communes (noyau, image, timings, instance-id)
 scripts/lib-common.sh             constantes, KVM, SSH, journalisation
-scripts/lib-cloudinit.sh          génération du seed cloud-init (unique)
-scripts/qemu-durable.sh           cycle de production : restauration, bureau, tunnel, relais, sauvegarde
+scripts/lib-cloudinit.sh          génération du seed cloud-init (minime, rapide)
+scripts/qemu-cycle.sh             le cycle en phases : restore, boot, install-desktop,
+                                  bridge, tunnel, publish, produce, dispatch, overlap, stop
 scripts/qemu-live.sh              session de diagnostic jetable (tunnels-linux-live.json)
 scripts/qemu-validation.sh        validation OS + noyau (KVM obligatoire)
 scripts/aios-data.sh              sauvegarde / restauration chiffrée
@@ -43,9 +44,28 @@ cloudflare-worker/worker.js       passerelle publique (auth, relais, documentati
 
 | Workflow | Rôle |
 |---|---|
-| `AI OS QEMU - relais et sauvegarde` | production : la VM vit ~5 h 30, puis arrêt propre, checkpoint chiffré, déclenchement du cycle suivant en chevauchement |
+| `AI OS QEMU - relais et sauvegarde` | production : le cycle complet, découpé en étapes visibles (ci-dessous) |
 | `AI OS QEMU - capture expérimentale` | diagnostic jetable, sans sauvegarde, publié sous `tunnels-linux-live.json` |
 | `AI OS QEMU - validation experimentale` | vérifie Ubuntu 26.10 + noyau 7.3.1 (KVM obligatoire, jamais de TCG) |
+
+### Le cycle de production, étape par étape
+
+```
+Restaurer le checkpoint chiffré (ou créer le disque)     ~5 min
+Démarrer la VM et attendre qu'elle soit prête            ~1-2 min
+Installer le bureau et les outils d'interaction          ~1-2 min (idempotent)
+Démarrer le pont d'interaction                           ~2 s
+Déployer le tunnel cloudflared                           ~20 s
+Publier l'URL et vérifier l'API d'interaction            ~5 s
+Phase de production (période d'utilisation)               5 h 00   ← le service est en ligne
+Créer et lancer le workflow suivant                      ~2 s
+Chevauchement — continuer à servir les requêtes          30 min   ← le successeur restaure
+Auto-arrêt propre et sauvegarde chiffrée                 ~5 min
+```
+
+Chaque ligne est une étape visible dans l'onglet Actions. Les durées de la
+production et du chevauchement se règlent dans `config/aios.conf`
+(`AIOS_PRODUCE_SECONDS`, `AIOS_OVERLAP_SECONDS`).
 
 ## Secrets
 
@@ -60,11 +80,12 @@ Secrets du Worker `ai-os` : `PASS` (code d'accès actuel) et `VM_API_TOKEN`.
 
 ## Relais blue-green
 
-Le cycle suivant est déclenché **30 minutes** avant l'arrêt du cycle courant
-(`AIOS_RELAY_TRIGGER_SECONDS=18000`, `AIOS_RELAY_SHUTDOWN_SECONDS=19800`).
-Pendant ce chevauchement, le successeur attend le `CHECKPOINT`, restaure,
-démarre, publie son tunnel — le Worker lit automatiquement la nouvelle URL.
-La coupure perçue est nulle tant que la restauration tient dans le chevauchement.
+La production dure 5 h 00 ; le cycle suivant est alors **créé et lancé** comme
+nouveau run de workflow, avec l'identifiant du cycle courant en paramètre.
+Pendant le **chevauchement** (30 min), le successeur attend le `CHECKPOINT`,
+restaure, démarre et publie son tunnel — puis le cycle courant s'auto-arrête
+et sauvegarde. La coupure perçue est nulle tant que la restauration du
+successeur tient dans le chevauchement.
 
 Contraintes mesurées (run `42384041709`, checkpoint de 1,9 Go) :
 sauvegarde ≈ 5 min, restauration + démarrage ≈ 8 min ; les deux croissent
@@ -114,11 +135,8 @@ Tout est dans `config/aios.conf` :
 
 - **Version du noyau** : modifier `AIOS_KERNEL_*` (une seule place).
 - **Ajouter des paquets à la VM** : les ajouter dans `aios_guest_packages`
-  (`scripts/lib-common.sh`), puis incrémenter `AIOS_INSTANCE_ID_*`. Le prochain
-  redémarrage du checkpoint existant ré-exécute les modules cloud-init et
-  installe les paquets manquants — le noyau est verrouillé par un marqueur et
-  n'est jamais réinstallé. Un passage convergent post-démarrage couvre les
-  anciens checkpoints.
+  (`scripts/lib-common.sh`) — l'étape « Installer le bureau et les outils » les
+  pose idempotemment au cycle suivant, sans rien réinstaller de déjà présent.
 - **Modèle de CPU** : `AIOS_QEMU_CPU` (défaut `host`). Un modèle nommé stable
   est nécessaire le jour où les checkpoints seront restaurés sur des runners de
   générations différentes — à valider d'abord avec le workflow de validation.

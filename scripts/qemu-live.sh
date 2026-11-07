@@ -26,7 +26,7 @@ qemu-img resize disk.img "$AIOS_DISK_SIZE"
 
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
 pub=$(cat "$work/key.pub")
-aios_write_cloudinit "$pub" "$AIOS_INSTANCE_ID_LIVE" full
+aios_write_cloudinit "$pub" "$AIOS_INSTANCE_ID"
 cloud-localds seed.img user-data meta-data
 
 qemu-system-x86_64 -machine "$AIOS_QEMU_MACHINE" -cpu "$AIOS_QEMU_CPU" -m "$AIOS_QEMU_MEM_MB" -smp "$AIOS_QEMU_SMP" \
@@ -64,7 +64,8 @@ done
 [[ "$ready" == 1 ]] || aios_die 'VM non disponible'
 aios_log 'VM prête : Ubuntu 26.10 avec noyau '"$AIOS_KERNEL_VERSION"
 
-ssh "${sshopts[@]}" "$AIOS_GUEST_USER@127.0.0.1" "pgrep -x Xvfb >/dev/null || nohup Xvfb $AIOS_GUEST_DISPLAY -screen 0 $AIOS_GUEST_RESOLUTION >/tmp/aios-xvfb.log 2>&1 </dev/null & pgrep -x xfce4-session >/dev/null || nohup env DISPLAY=$AIOS_GUEST_DISPLAY xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null &"
+aios_guest_ensure_desktop sshopts || aios_warn "Installation des outils incomplète."
+aios_guest_start_desktop sshopts
 
 AIOS_SSH_KEY="$work/key" AIOS_KNOWN_HOSTS="$work/known_hosts" \
   node "$GITHUB_WORKSPACE/scripts/qemu-interaction-bridge.cjs" > bridge.log 2>&1 &

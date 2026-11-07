@@ -7,7 +7,7 @@ on:
         required: false
         default: ''
       test_relay:
-        description: 'Test accéléré du premier relais uniquement'
+        description: 'Test accéléré du relais uniquement'
         type: boolean
         default: false
 permissions:
@@ -18,23 +18,67 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+
       - name: Vérifier et activer KVM
         run: |
           test -e /dev/kvm || { echo '::error::KVM indisponible'; exit 1; }
           sudo chown "$(id -u):$(id -g)" /dev/kvm
           sudo chmod 660 /dev/kvm
-      - name: Installer les outils
+
+      - name: Installer les outils du runner (QEMU, cloud-init, GPG)
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils openssh-client curl gnupg
-      - name: Lancer et relayer la VM
+
+      - name: Restaurer le checkpoint chiffré (ou créer le disque)
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           AIOS_BACKUP_KEY: ${{ secrets.AIOS_BACKUP_KEY }}
           AIOS_VM_SSH_KEY: ${{ secrets.AIOS_VM_SSH_KEY }}
-          VM_API_TOKEN: ${{ secrets.VM_API_TOKEN }}
           PREDECESSOR_RUN_ID: ${{ inputs.predecessor_run_id }}
+        run: bash scripts/qemu-cycle.sh restore
+
+      - name: Démarrer la VM et attendre qu'elle soit prête
+        run: bash scripts/qemu-cycle.sh boot
+
+      - name: Installer le bureau et les outils d'interaction
+        run: bash scripts/qemu-cycle.sh install-desktop
+
+      - name: Démarrer le pont d'interaction
+        env:
+          VM_API_TOKEN: ${{ secrets.VM_API_TOKEN }}
+        run: bash scripts/qemu-cycle.sh bridge
+
+      - name: Déployer le tunnel cloudflared
+        run: bash scripts/qemu-cycle.sh tunnel
+
+      - name: Publier l'URL et vérifier l'API d'interaction
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          VM_API_TOKEN: ${{ secrets.VM_API_TOKEN }}
+        run: bash scripts/qemu-cycle.sh publish
+
+      - name: Phase de production (période d'utilisation)
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          AIOS_BACKUP_KEY: ${{ secrets.AIOS_BACKUP_KEY }}
           TEST_RELAY: ${{ inputs.test_relay }}
-        run: |
-          if [ "$TEST_RELAY" = true ]; then export RELAY_TRIGGER_SECONDS=40 RELAY_SHUTDOWN_SECONDS=100; fi
-          bash scripts/qemu-durable.sh
+        run: bash scripts/qemu-cycle.sh produce
+
+      - name: Créer et lancer le workflow suivant
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: bash scripts/qemu-cycle.sh dispatch
+
+      - name: Chevauchement — continuer à servir les requêtes
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          AIOS_BACKUP_KEY: ${{ secrets.AIOS_BACKUP_KEY }}
+          TEST_RELAY: ${{ inputs.test_relay }}
+        run: bash scripts/qemu-cycle.sh overlap
+
+      - name: Auto-arrêt propre et sauvegarde chiffrée
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          AIOS_BACKUP_KEY: ${{ secrets.AIOS_BACKUP_KEY }}
+        run: bash scripts/qemu-cycle.sh stop
