@@ -182,7 +182,7 @@ aios_guest_start_stream() {
   # de pgrep elle-même (le piège classique du pgrep -f).
   aios_guest_ssh "$1" 20 "command -v x11vnc >/dev/null || exit 0; pgrep -x x11vnc >/dev/null && exit 0; setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null & exit 0" \
     || aios_warn "x11vnc non démarré dans l'invité."
-  aios_guest_ssh "$1" 20 "command -v websockify >/dev/null || exit 0; pgrep -f '[w]ebsockify' >/dev/null && exit 0; setsid nohup websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null & exit 0" \
+  aios_guest_ssh "$1" 20 "command -v websockify >/dev/null || exit 0; pgrep -f '[w]ebsockify' >/dev/null && exit 0; setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null & exit 0" \
     || aios_warn "websockify non démarré dans l'invité."
 }
 

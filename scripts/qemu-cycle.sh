@@ -96,7 +96,7 @@ monitor_loop() {
       aios_warn "Forward du flux bureau arrêté : redémarrage."
       start_vnc_forward
     fi
-    if ! curl -sf --max-time 2 -o /dev/null "http://127.0.0.1:6080/"; then
+    if [[ "$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:6080/" || true)" == "000" ]]; then
       aios_warn "Flux bureau (noVNC) injoignable : relance du flux invité et du forward."
       aios_guest_start_stream sshopts || true
       kill "$(file_pid vncfwd.pid)" 2>/dev/null || true
@@ -209,14 +209,21 @@ bridge)
   curl -s --max-time 2 -H "Authorization: Bearer $VM_API_TOKEN" "http://$AIOS_BRIDGE_HOST:$AIOS_BRIDGE_PORT/health" || aios_die "Pont d'interaction injoignable."
   # Le flux bureau doit être joignable à travers le forward SSH ; à défaut,
   # relance idempotente du flux invité (x11vnc + websockify) puis du forward.
-  if ! curl -sf --max-time 2 -o /dev/null "http://127.0.0.1:6080/"; then
+  # N'importe quelle réponse HTTP prouve que le démon écoute : seule l'absence
+  # de connexion (code 000) compte comme panne.
+  vnc_up() { [[ "$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:6080/" || true)" != "000" ]]; }
+  if ! vnc_up; then
     aios_warn "noVNC injoignable : relance du flux invité et du forward."
     aios_guest_start_stream sshopts
     kill "$(file_pid vncfwd.pid)" 2>/dev/null || true
     start_vnc_forward
     sleep 3
   fi
-  curl -sf --max-time 3 -o /dev/null "http://127.0.0.1:6080/" || aios_die "Flux bureau (noVNC) injoignable après relance."
+  if ! vnc_up; then
+    aios_log "Diagnostic invité :"
+    aios_guest_ssh sshopts 15 'ss -ltn 2>/dev/null | grep -E "6080|5900" || echo "aucune écoute 6080/5900"; pgrep -af "[w]ebsockify|x11vnc" || echo "aucun processus de flux"; tail -n 8 /tmp/aios-websockify.log /tmp/aios-x11vnc.log 2>/dev/null || true' || true
+    aios_die "Flux bureau (noVNC) injoignable après relance."
+  fi
   aios_log "Pont d'interaction opérationnel (port $AIOS_BRIDGE_PORT, flux bureau via forward SSH)."
   ;;
 
