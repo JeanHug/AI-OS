@@ -153,7 +153,12 @@ function proxyDesktopHttp(req, res) {
     res.writeHead(up.statusCode || 502, up.headers);
     up.pipe(res);
   });
-  upstream.on('error', () => { if (!res.headersSent) fail(res, 502, 'Flux bureau indisponible (noVNC non joignable)'); else res.end(); });
+  upstream.on('error', () => {
+    if (res.headersSent) return res.end();
+    // Jamais d'erreur JSON sur les routes navigateur : page sobre, HTML.
+    res.writeHead(502, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('<!doctype html><meta charset="utf-8"><title>AI OS</title><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0a0a0a;color:#eee"><div style="text-align:center"><p style="font-size:20px">Le bureau redémarre…</p><p style="opacity:.7">Réessayez dans une minute.</p></div></body>');
+  });
   req.pipe(upstream);
 }
 
