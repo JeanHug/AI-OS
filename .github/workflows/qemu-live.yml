@@ -9,6 +9,16 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Verify hardware acceleration
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::This GitHub runner does not provide /dev/kvm. QEMU TCG is too slow for this project."
+            exit 1
+          fi
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 660 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm || { echo "::error::Cannot access /dev/kvm"; exit 1; }
+          echo "KVM device available for this job."
       - name: Install QEMU
         run: |
           sudo apt-get update

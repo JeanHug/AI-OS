@@ -41,10 +41,10 @@ instance-id: aios-qemu-validation
 local-hostname: aios
 EOF_META
 cloud-localds seed.img user-data meta-data
-accel=tcg
-cpu=max
-if [[ -r /dev/kvm && -w /dev/kvm ]]; then accel=kvm; cpu=host; fi
-echo "Accélération : $accel"
+[[ -r /dev/kvm && -w /dev/kvm ]] || { echo "KVM requis : émulation TCG désactivée pour éviter une attente excessive."; exit 1; }
+accel=kvm
+cpu=host
+echo "Accélération : KVM"
 qemu-system-x86_64 -machine "q35,accel=$accel" -cpu "$cpu" -m 3072 -smp 2 \
   -drive "file=$image,if=virtio,format=qcow2" -drive file=seed.img,if=virtio,format=raw \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:22222-:22 -device virtio-net-pci,netdev=net0 \
