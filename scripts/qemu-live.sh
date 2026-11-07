@@ -26,6 +26,15 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
       - $pub
+write_files:
+  - path: /etc/polkit-1/rules.d/49-aios-colord.rules
+    owner: root:root
+    permissions: '0644'
+    content: |
+      polkit.addRule(function(action, subject) {
+        var allowed = ["org.freedesktop.color-manager.create-device", "org.freedesktop.color-manager.create-profile", "org.freedesktop.color-manager.modify-device", "org.freedesktop.color-manager.modify-profile"];
+        if (subject.user === "aios" && allowed.indexOf(action.id) !== -1) return polkit.Result.YES;
+      });
 package_update: true
 packages:
   - openssh-server
