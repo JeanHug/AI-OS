@@ -1,9 +1,9 @@
 /**
- * Cloudflare Worker: Passerelle Sécurisée & API d'Interaction Linux pour JeanHug/VM
- * Déployé sous le nom "vm" (https://vm.hugdu77777.workers.dev)
+ * Cloudflare Worker: Passerelle Sécurisée & API d'Interaction Linux pour JeanHug/AI-OS
+ * Déployé sous le nom "vm" (https://ai-os.hugdu77777.workers.dev)
  */
 
-const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/JeanHug/VM/tunnel-url/";
+const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/JeanHug/AI-OS/tunnel-url/";
 
 export default {
   async fetch(request, env, ctx) {
@@ -49,7 +49,7 @@ export default {
         JSON.stringify({
           status: "ok",
           service: "VM Linux API Gateway",
-          worker: "vm",
+          worker: "ai-os",
           timestamp: new Date().toISOString(),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
@@ -206,11 +206,8 @@ export default {
           redirect: "follow"
         });
 
-        // Si le démon sur le runner répond (y compris un 404 légitime comme fichier non trouvé)
-        const isFromDaemon = vmResponse.headers.has("x-linux-daemon") || 
-                             vmResponse.headers.get("content-type")?.includes("application/json");
-
-        if (isFromDaemon || (vmResponse.status !== 404 && vmResponse.status !== 502)) {
+        // Si le démon sur le runner répond avec succès ou erreur spécifique
+        if (vmResponse.status !== 404 && vmResponse.status !== 502) {
           const respHeaders = new Headers(vmResponse.headers);
           respHeaders.set("Access-Control-Allow-Origin", "*");
           respHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");

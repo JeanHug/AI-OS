@@ -65,6 +65,12 @@ jobs:
         run: |
           ./scripts/start-tunnel.sh
 
+      - name: Check AI OS Worker gateway
+        env:
+          AI_OS_WORKER_URL: https://ai-os.hugdu77777.workers.dev
+        run: |
+          curl --fail --silent --show-error --max-time 15 "$AI_OS_WORKER_URL/health" || echo "Worker unavailable; VM will continue running."
+
       - name: Run Linux Relay Orchestrator & Continuous Backup
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
