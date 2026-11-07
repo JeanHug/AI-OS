@@ -1,0 +1,40 @@
+name: AI OS QEMU - relais et sauvegarde
+on:
+  workflow_dispatch:
+    inputs:
+      predecessor_run_id:
+        description: 'Cycle précédent (rempli automatiquement)'
+        required: false
+        default: ''
+      test_relay:
+        description: 'Test accéléré du premier relais uniquement'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vérifier et activer KVM
+        run: |
+          test -e /dev/kvm || { echo '::error::KVM indisponible'; exit 1; }
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 660 /dev/kvm
+      - name: Installer les outils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils openssh-client curl gnupg
+      - name: Lancer et relayer la VM
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          AIOS_BACKUP_KEY: ${{ secrets.AIOS_BACKUP_KEY }}
+          AIOS_VM_SSH_KEY: ${{ secrets.AIOS_VM_SSH_KEY }}
+          VM_API_TOKEN: ${{ secrets.VM_API_TOKEN }}
+          PREDECESSOR_RUN_ID: ${{ inputs.predecessor_run_id }}
+          TEST_RELAY: ${{ inputs.test_relay }}
+        run: |
+          if [ "$TEST_RELAY" = true ]; then export RELAY_TRIGGER_SECONDS=40 RELAY_SHUTDOWN_SECONDS=100; fi
+          bash scripts/qemu-durable.sh
