@@ -198,6 +198,10 @@ export default {
           }
         }
         forwardHeaders.set("X-Forwarded-Host", url.host);
+        if (!env.VM_API_TOKEN) return new Response("VM bridge not configured", { status: 503 });
+        forwardHeaders.set("Authorization", `Bearer ${env.VM_API_TOKEN}`);
+        targetVmUrl.searchParams.delete("password");
+        targetVmUrl.searchParams.delete("pin");
 
         const vmResponse = await fetch(targetVmUrl.toString(), {
           method: request.method,
