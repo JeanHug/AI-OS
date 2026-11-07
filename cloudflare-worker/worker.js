@@ -1,9 +1,19 @@
 /**
- * Cloudflare Worker: Passerelle Sécurisée & API d'Interaction Linux pour JeanHug/AI-OS
- * Déployé sous le nom "vm" (https://ai-os.hugdu77777.workers.dev)
+ * Cloudflare Worker « ai-os » : passerelle sécurisée et API d'interaction
+ * de la VM AI OS (https://ai-os.hugdu77777.workers.dev).
  */
 
 const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/JeanHug/AI-OS/tunnel-url/";
+
+/** Comparaison à temps constant (le Worker n'a pas crypto.timingSafeEqual). */
+function timingSafeEqualStr(a, b) {
+  const ab = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -48,7 +58,7 @@ export default {
       return new Response(
         JSON.stringify({
           status: "ok",
-          service: "VM Linux API Gateway",
+          service: "AI OS — passerelle VM Linux",
           worker: "ai-os",
           timestamp: new Date().toISOString(),
         }),
@@ -92,7 +102,7 @@ export default {
 
     const expectedPassword = env.PASS;
 
-    if (!expectedPassword || !userPassword || userPassword !== expectedPassword) {
+    if (!expectedPassword || !userPassword || !timingSafeEqualStr(userPassword, expectedPassword)) {
       return new Response(
         JSON.stringify({
           ok: false,
@@ -131,21 +141,11 @@ export default {
 
     // 7. Route générale : Tunnels et Statut Global (/ ou /api/tunnels)
     if (url.pathname === "/" || url.pathname === "/api/tunnels") {
-      let androidTunnel = null;
-      try {
-        const resAndroid = await fetch(`${GITHUB_RAW_BASE}tunnels-android.json?_t=${Date.now()}`, {
-          headers: { "User-Agent": "Cloudflare-VM-Gateway" },
-          cf: { cacheTtl: 0, cacheEverything: false }
-        });
-        if (resAndroid.ok) androidTunnel = await resAndroid.json();
-      } catch (e) {}
-
       return new Response(
         JSON.stringify({
           authenticated: true,
           status: linuxTunnel?.status || "online",
           linux: linuxTunnel || { name: "Ubuntu Linux Desktop", primary: linuxPrimaryUrl, status: "online" },
-          android: androidTunnel,
           primary: linuxPrimaryUrl,
           cloudflare: linuxPrimaryUrl,
           docs_url: `${url.origin}/docs`,
@@ -210,8 +210,13 @@ export default {
           redirect: "follow"
         });
 
-        // Si le démon sur le runner répond avec succès ou erreur spécifique
-        if (vmResponse.status !== 404 && vmResponse.status !== 502) {
+        // Le pont d'interaction signale ses réponses par X-Linux-Daemon. Sans cet
+        // en-tête, une réponse 404/502 vient du tunnel lui-même (pont absent) et
+        // ne doit JAMAIS être présentée comme un succès.
+        const isFromDaemon = vmResponse.headers.has("x-linux-daemon") ||
+          (vmResponse.headers.get("content-type") || "").includes("application/json");
+
+        if (isFromDaemon || (vmResponse.status !== 404 && vmResponse.status !== 502)) {
           const respHeaders = new Headers(vmResponse.headers);
           respHeaders.set("Access-Control-Allow-Origin", "*");
           respHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -223,18 +228,15 @@ export default {
           });
         }
 
-        // Si le runner actuel ne dispose pas encore du micro-démon API (cycle en cours avant bascule)
+        // Le tunnel existe mais aucun pont d'interaction n'y répond.
         return new Response(
           JSON.stringify({
             ok: false,
-            status: "daemon_pending_cycle",
-            message: "Le tunnel Linux est actif et opérationnel, mais le micro-démon d'API local sera activé lors du prochain relais automatique.",
-            desktop_url: linuxPrimaryUrl,
-            tunnel_info: linuxTunnel,
-            command_preview: requestBody?.command || null,
-            help: "Vous pouvez accéder directement au bureau graphique via l'URL ci-dessus."
+            status: "bridge_unreachable",
+            message: "Le tunnel est publié mais le pont d'interaction ne répond pas. Le système sera restauré lors du prochain cycle.",
+            tunnel_info: linuxTunnel
           }, null, 2),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
         );
 
       } catch (err) {
@@ -287,7 +289,7 @@ function generateDocsHtml(origin) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Documentation API Linux VM — JeanHug/VM</title>
+  <title>Documentation API — AI OS</title>
   <style>
     :root {
       --bg: #ffffff;
@@ -495,7 +497,7 @@ function generateDocsHtml(origin) {
           <tr>
             <td><span class="method get">GET</span></td>
             <td><code>/api/tunnels</code></td>
-            <td>Retourne les URLs en direct de toutes les VMs (Linux & Android).</td>
+            <td>Retourne les URLs en direct de la VM Linux.</td>
           </tr>
           <tr>
             <td><span class="method get">GET</span></td>
@@ -535,7 +537,7 @@ function generateDocsHtml(origin) {
           <tr>
             <td><span class="method get">GET</span></td>
             <td><code>/api/linux/files?path=...</code></td>
-            <td>Liste le contenu d'un répertoire dans <code>/home/kasm-user</code>.</td>
+            <td>Liste le contenu d'un répertoire dans <code>/home/aios</code>.</td>
           </tr>
           <tr>
             <td><span class="method get">GET</span></td>
@@ -572,7 +574,7 @@ Authorization: Bearer &lt;VOTRE_MOT_DE_PASSE&gt;
 
 {
   "command": "python3 -c 'import platform; print(platform.uname())'",
-  "cwd": "/home/kasm-user",
+  "cwd": "/home/aios",
   "timeout": 30
 }</pre>
 
@@ -616,7 +618,7 @@ Authorization: Bearer &lt;VOTRE_MOT_DE_PASSE&gt;
             <option value="GET|/api/linux/screenshot">GET /api/linux/screenshot (Capture d'écran)</option>
             <option value="GET|/api/linux/clipboard">GET /api/linux/clipboard (Presse-papier)</option>
             <option value="GET|/api/linux/processes">GET /api/linux/processes (Processus)</option>
-            <option value="GET|/api/linux/files?path=/home/kasm-user/Desktop">GET /api/linux/files (Bureau)</option>
+            <option value="GET|/api/linux/files?path=/home/aios">GET /api/linux/files (Domicile)</option>
           </select>
         </div>
 
