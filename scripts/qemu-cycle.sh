@@ -57,7 +57,8 @@ start_tunnel() {
     "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID:-}/cfd_tunnel/${AIOS_TUNNEL_ID}/token" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("result") or "", end="")') || true
   [[ -n "$tok" ]] || aios_die "Jeton connecteur du tunnel durable indisponible (CLOUDFLARE_TOKEN/CLOUDFLARE_ID)."
-  nohup "$AIOS_WORK_DIR/cloudflared" tunnel run --token "$tok" --no-autoupdate \
+  # NB : --no-autoupdate est un drapeau GLOBAL : avant le sous-commande « tunnel ».
+  nohup "$AIOS_WORK_DIR/cloudflared" --no-autoupdate tunnel run --token "$tok" \
     </dev/null >"$AIOS_WORK_DIR/tunnel.log" 2>&1 &
   echo $! > "$AIOS_STATE_DIR/tunnel.pid"
 }
@@ -210,7 +211,10 @@ tunnel)
     chmod +x "$AIOS_WORK_DIR/cloudflared"
   fi
   start_tunnel
-  wait_tunnel_registered || aios_die "Tunnel durable non enregistré auprès de Cloudflare."
+  if ! wait_tunnel_registered; then
+    aios_log "Fin de tunnel.log :"; tail -n 15 "$AIOS_WORK_DIR/tunnel.log" || true
+    aios_die "Tunnel durable non enregistré auprès de Cloudflare."
+  fi
   state_write tunnel-url "$AIOS_DESK_URL"
   aios_log "Tunnel durable « $AIOS_TUNNEL_NAME » actif — lien interactif fixe : $AIOS_DESK_URL"
   ;;
