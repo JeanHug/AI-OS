@@ -8,16 +8,21 @@ naturel. Le navigateur porte l'interface ; une VM QEMU (Ubuntu 26.10, noyau
 ## Architecture
 
 ```
-Navigateur ──► Cloudflare Worker « ai-os » ──► tunnel cloudflared ──► pont d'interaction
-   │                  │                                                  │  (runner)
-   │                  ├─ lit l'URL du tunnel sur la branche tunnel-url    │
-   │                  └─ authentification (PASS) + relais des routes      │
-   │                                                                     ▼
-   │                                                    VM QEMU (Ubuntu 26.10 / 7.3.1)
-   │                                                    XFCE sur Xvfb :99, utilisateur aios
+Navigateur ──► Cloudflare Worker « ai-os » ──► tunnel durable « ai-os » ──► pont d'interaction
+   │            (API : auth, relais)              (cloudflared nommé)          │  (runner)
+   │                  │                                  ▲                     │
+   │                  │             Worker « ai-os-desk » ┘ (liaison VPC)      ▼
+   │                  │             = le lien interactif fixe        VM QEMU (Ubuntu 26.10 / 7.3.1)
+   │                                                                     XFCE sur Xvfb :99, utilisateur aios
    │
    └─ état persistant ◄── checkpoints chiffrés (GPG AES256) ── JeanHug/ai-os-data-private
 ```
+
+Le tunnel est **durable** : un tunnel nommé Cloudflare créé via l'API
+(`CLOUDFLARE_TOKEN`), dont le connecteur se relance avec un jeton dédié. Son
+URL publique (`ai-os-desk.hugdu77777.workers.dev`, reliée au tunnel par liaison
+VPC) est **fixe** — plus aucune URL `trycloudflare` éphémère, plus aucune
+publication d'URL à découvrir.
 
 Trois familles d'applications pourront cohabiter : pures pages web, pages avec
 dos sur la VM (API d'interaction ou services locaux), et fenêtres diffusant un
@@ -35,9 +40,10 @@ scripts/qemu-live.sh              session de diagnostic jetable (tunnels-linux-l
 scripts/qemu-validation.sh        validation OS + noyau (KVM obligatoire)
 scripts/aios-data.sh              sauvegarde / restauration chiffrée
 scripts/qemu-interaction-bridge.cjs  pont d'interaction (authentifié, port 3001)
-scripts/qemu-publish-tunnel.cjs   publication de l'URL du tunnel
-scripts/deploy-cloudflare-worker.cjs déploiement du Worker « ai-os »
+scripts/qemu-publish-tunnel.cjs   publication du statut du tunnel (branche tunnel-url)
+scripts/deploy-cloudflare-worker.cjs déploiement des Workers « ai-os » et « ai-os-desk »
 cloudflare-worker/worker.js       passerelle publique (auth, relais, documentation)
+cloudflare-worker/desk-worker.js  lien interactif (transparence HTTP/WebSocket vers le pont)
 ```
 
 ## Workflows (tous `workflow_dispatch`)
@@ -71,12 +77,15 @@ production et du chevauchement se règlent dans `config/aios.conf`
 
 | Secret GitHub | Usage |
 |---|---|
-| `GH_TOKEN` | API GitHub : checkpoint, publication du tunnel, déclenchement du relais |
+| `GH_TOKEN` | API GitHub : checkpoint, publication du statut, déclenchement du relais |
 | `AIOS_BACKUP_KEY` | chiffrement GPG des checkpoints. **Irrécupérable s'il est perdu.** |
 | `AIOS_VM_SSH_KEY` | clé SSH de l'invité (la clé publique est ancrée dans le checkpoint) |
 | `VM_API_TOKEN` | jeton du pont d'interaction (≥ 32 caractères) |
+| `CLOUDFLARE_ID` / `CLOUDFLARE_TOKEN` | compte Cloudflare : tunnel durable nommé, jeton connecteur |
 
 Secrets du Worker `ai-os` : `PASS` (code d'accès actuel) et `VM_API_TOKEN`.
+Le Worker `ai-os-desk` (lien interactif) n'a aucun secret : il s'appuie sur la
+liaison VPC vers le tunnel durable, et l'authentification reste au pont.
 
 ## Relais blue-green
 
@@ -113,8 +122,9 @@ Page blanche, un seul champ : le code d'accès. Aucun mot de passe n'est écrit
 dans le code source — le code est vérifié par le Worker (`POST /grant`), qui
 répond par un jeton signé HMAC valable 4 h et renvoie vers le bureau.
 
-- `app/` → le code → redirection vers le tunnel **avec** le jeton signé → bureau.
-- L'URL du tunnel ouverte **sans** autorisation → redirection vers `app/`.
+- `app/` → le code → redirection vers le lien interactif fixe **avec** le jeton
+  signé → bureau (noVNC à travers le tunnel durable).
+- Le lien interactif ouvert **sans** autorisation → redirection vers `app/`.
 - Le navigateur mémorise l'accès (cookie) : 4 h d'utilisation directe.
 - L'API d'interaction reste derrière le Worker `ai-os` (Bearer), jamais exposée
   comme interface.

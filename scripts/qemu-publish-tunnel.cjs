@@ -7,7 +7,7 @@ const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GH_TOKEN;
 const origin = process.env.AIOS_TUNNEL;
 const tunnelFile = process.env.AIOS_TUNNEL_FILE || 'tunnels-linux.json';
-if (!repo || !token || !/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(origin || '')) throw Error('Missing publish settings');
+if (!repo || !token || !/^https:\/\/ai-os-desk\.[a-z0-9.-]+\.workers\.dev$/.test(origin || '')) throw Error('Missing publish settings');
 if (!/^tunnels-[a-z-]+\.json$/.test(tunnelFile)) throw Error('AIOS_TUNNEL_FILE invalide');
 
 async function api(path, init = {}) {

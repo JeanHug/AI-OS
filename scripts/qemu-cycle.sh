@@ -49,7 +49,15 @@ start_bridge() {
 }
 
 start_tunnel() {
-  nohup "$AIOS_WORK_DIR/cloudflared" tunnel --url "http://$AIOS_BRIDGE_HOST:$AIOS_BRIDGE_PORT" --no-autoupdate \
+  # Tunnel durable nommé « ai-os » (déclaré à Cloudflare via l'API, config
+  # distante ingress → pont :3001). Le jeton connecteur est récupéré à chaque
+  # démarrage avec CLOUDFLARE_TOKEN : l'URL publique ne change JAMAIS.
+  local tok
+  tok=$(curl -fsS --max-time 30 -H "Authorization: Bearer ${CLOUDFLARE_TOKEN:-}" \
+    "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID:-}/cfd_tunnel/${AIOS_TUNNEL_ID}/token" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("result") or "", end="")') || true
+  [[ -n "$tok" ]] || aios_die "Jeton connecteur du tunnel durable indisponible (CLOUDFLARE_TOKEN/CLOUDFLARE_ID)."
+  nohup "$AIOS_WORK_DIR/cloudflared" tunnel run --token "$tok" --no-autoupdate \
     </dev/null >"$AIOS_WORK_DIR/tunnel.log" 2>&1 &
   echo $! > "$AIOS_STATE_DIR/tunnel.pid"
 }
@@ -61,11 +69,11 @@ start_vnc_forward() {
   echo $! > "$AIOS_STATE_DIR/vncfwd.pid"
 }
 
-wait_tunnel_url() {
-  local t
-  for _ in $(seq 1 90); do
-    t=$(grep -o 'https://[-a-zA-Z0-9_.]*\.trycloudflare\.com' "$AIOS_WORK_DIR/tunnel.log" | head -1 || true)
-    if [[ -n "$t" ]]; then printf '%s' "$t"; return 0; fi
+wait_tunnel_registered() {
+  # Le connecteur durable annonce « Registered tunnel connection » dès que
+  # ses liaisons avec l'edge Cloudflare sont établies (aucune URL à attendre).
+  for _ in $(seq 1 30); do
+    grep -q 'Registered tunnel connection' "$AIOS_WORK_DIR/tunnel.log" 2>/dev/null && return 0
     sleep 2
   done
   return 1
@@ -88,10 +96,11 @@ monitor_loop() {
       start_vnc_forward
     fi
     if ! pid_alive "$(file_pid tunnel.pid)"; then
-      aios_warn "Tunnel arrêté : redémarrage et republication."
+      aios_warn "Tunnel durable arrêté : redémarrage."
       start_tunnel
-      local t; t=$(wait_tunnel_url || true)
-      if [[ -n "${t:-}" ]]; then state_write tunnel-url "$t"; AIOS_TUNNEL="$t" node "$AIOS_REPO_ROOT/scripts/qemu-publish-tunnel.cjs" || true; fi
+      wait_tunnel_registered || true
+      state_write tunnel-url "$AIOS_DESK_URL"
+      AIOS_TUNNEL="$AIOS_DESK_URL" node "$AIOS_REPO_ROOT/scripts/qemu-publish-tunnel.cjs" || true
     fi
     if (( elapsed - last_beat >= 60 )); then
       last_beat=$elapsed
@@ -201,14 +210,15 @@ tunnel)
     chmod +x "$AIOS_WORK_DIR/cloudflared"
   fi
   start_tunnel
-  t=$(wait_tunnel_url) || aios_die "Tunnel indisponible."
-  state_write tunnel-url "$t"
-  aios_log "Tunnel cloudflared déployé : $t"
+  wait_tunnel_registered || aios_die "Tunnel durable non enregistré auprès de Cloudflare."
+  state_write tunnel-url "$AIOS_DESK_URL"
+  aios_log "Tunnel durable « $AIOS_TUNNEL_NAME » actif — lien interactif fixe : $AIOS_DESK_URL"
   ;;
 
 publish)
   aios_require_env GH_TOKEN
-  t=$(state_read tunnel-url); [[ -n "$t" ]] || aios_die "Aucune URL de tunnel."
+  t=$(state_read tunnel-url); [[ -n "$t" ]] || t="$AIOS_DESK_URL"
+  state_write tunnel-url "$t"
   AIOS_TUNNEL="$t" node "$AIOS_REPO_ROOT/scripts/qemu-publish-tunnel.cjs"
   if [[ -n "${VM_API_TOKEN:-}" ]]; then
     ok=0

@@ -3,7 +3,12 @@
  * de la VM AI OS (https://ai-os.hugdu77777.workers.dev).
  */
 
-const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/JeanHug/AI-OS/tunnel-url/";
+/**
+ * Bureau interactif : lien fixe du tunnel durable « ai-os » (tunnel nommé
+ * Cloudflare, relié au Worker ai-os-desk par liaison VPC). Aucune URL de
+ * tunnel n'est plus publiée ni découverte — elle ne change jamais.
+ */
+const DESK_URL = "https://ai-os-desk.hugdu77777.workers.dev";
 
 /** Comparaison à temps constant (le Worker n'a pas crypto.timingSafeEqual). */
 function timingSafeEqualStr(a, b) {
@@ -146,33 +151,13 @@ export default {
       );
     }
 
-    // 5. Récupération de l'état des tunnels depuis GitHub
-    let tunnelsData = null;
-    let linuxTunnel = null;
-    try {
-      const timestamp = Date.now();
-      const resLinux = await fetch(`${GITHUB_RAW_BASE}tunnels-linux.json?_t=${timestamp}`, {
-        headers: { "User-Agent": "Cloudflare-VM-Gateway" },
-        cf: { cacheTtl: 0, cacheEverything: false }
-      });
-      if (resLinux.ok) {
-        linuxTunnel = await resLinux.json();
-      }
-    } catch (e) {
-      console.warn("Échec récupération tunnels-linux.json:", e);
-    }
-
-    const linuxPrimaryUrl = linuxTunnel?.cloudflare || linuxTunnel?.primary || linuxTunnel?.lhrLife || null;
+    // 5. Lien du bureau (URL fixe du tunnel durable)
+    const linuxPrimaryUrl = DESK_URL;
 
     // 5b. Délivrance du jeton d'accès au bureau (utilisé par la page d'application)
     if (url.pathname === "/grant" || url.pathname === "/api/grant") {
       if (!env.VM_API_TOKEN) {
         return new Response(JSON.stringify({ ok: false, error: "VM_API_TOKEN absent du Worker" }), {
-          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
-        });
-      }
-      if (!linuxPrimaryUrl) {
-        return new Response(JSON.stringify({ ok: false, error: "Le bureau n'est pas encore disponible (tunnel absent)." }), {
           status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
         });
       }
@@ -184,7 +169,7 @@ export default {
 
     // 6. Lien interactif : ouverture du bureau (jeton signé à usage temporaire)
     const target = url.searchParams.get("target")?.toLowerCase();
-    if (target === "linux" && linuxPrimaryUrl) {
+    if (target === "linux") {
       if (!env.VM_API_TOKEN) {
         return new Response(JSON.stringify({ ok: false, error: "VM_API_TOKEN absent du Worker" }), {
           status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
@@ -199,12 +184,12 @@ export default {
       return new Response(
         JSON.stringify({
           authenticated: true,
-          status: linuxTunnel?.status || "online",
-          linux: linuxTunnel || { name: "Ubuntu Linux Desktop", primary: linuxPrimaryUrl, status: "online" },
+          status: "online",
+          linux: { name: "Ubuntu Linux Desktop", primary: linuxPrimaryUrl, status: "online" },
           primary: linuxPrimaryUrl,
           cloudflare: linuxPrimaryUrl,
           docs_url: `${url.origin}/docs`,
-          updated_at: linuxTunnel?.updated_at || new Date().toISOString()
+          updated_at: new Date().toISOString()
         }, null, 2),
         { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
       );
@@ -217,10 +202,10 @@ export default {
         return new Response(
           JSON.stringify({
             ok: true,
-            status: linuxPrimaryUrl ? "online" : "offline",
+            status: "online",
             name: "Ubuntu Linux Desktop",
             tunnel_url: linuxPrimaryUrl,
-            updated_at: linuxTunnel?.updated_at || null,
+            updated_at: new Date().toISOString(),
             gateway: url.origin,
             docs_url: `${url.origin}/docs`
           }, null, 2),
@@ -228,19 +213,7 @@ export default {
         );
       }
 
-      // 8b. Vérification si le tunnel Linux est disponible
-      if (!linuxPrimaryUrl) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: "La VM Linux est en cours de démarrage ou le tunnel n'est pas encore publié.",
-            status: "starting"
-          }, null, 2),
-          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
-        );
-      }
-
-      // 8c. Transmission directe de la requête au runner Linux via le tunnel Cloudflare
+      // 8b. Transmission directe de la requête au runner Linux via le tunnel Cloudflare
       const targetVmUrl = new URL(url.pathname, linuxPrimaryUrl);
       targetVmUrl.search = url.search;
 
@@ -289,7 +262,7 @@ export default {
             ok: false,
             status: "bridge_unreachable",
             message: "Le tunnel est publié mais le pont d'interaction ne répond pas. Le système sera restauré lors du prochain cycle.",
-            tunnel_info: linuxTunnel
+            tunnel_info: { tunnel: "ai-os", url: DESK_URL }
           }, null, 2),
           { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
         );
@@ -299,7 +272,7 @@ export default {
           JSON.stringify({
             ok: false,
             error: "Erreur de communication avec le tunnel Linux: " + err.message,
-            tunnel_url: linuxPrimaryUrl
+            tunnel_url: DESK_URL
           }, null, 2),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
         );
