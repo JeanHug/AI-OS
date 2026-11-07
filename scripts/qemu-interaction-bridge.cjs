@@ -1,22 +1,27 @@
 'use strict';
 /**
- * qemu-interaction-bridge.cjs — pont d'interaction AI OS (exécuté sur le runner).
+ * qemu-interaction-bridge.cjs — pont AI OS (exécuté sur le runner).
  *
- * Expose l'API d'interaction de la VM derrière le tunnel cloudflared :
- * exécution de commandes, souris, clavier, presse-papier, fichiers,
- * lancement d'applications, processus, captures d'écran.
+ * Deux visages, un seul tunnel :
+ *   /                      bureau interactif (noVNC proxy vers l'invité)
+ *   /websockify            flux VNC WebSocket (proxy)
+ *   /api/linux/*, /api/v1/* API d'interaction (jeton Bearer — usage Worker)
+ *   /health                sonde du pont
+ *
+ * Le Bureau est protégé par une « autorisation » portée par :
+ *   ?s=<exp>.<hmac>        jeton signé HMAC-SHA256 (délivré par le Worker)
+ *   ?tok=<VM_API_TOKEN>    jeton brut (usage machine)
+ *   cookie aios_s          mémorisation de l'autorisation
+ *   Authorization: Basic  utilisateur quelconque, mot de passe = VM_API_TOKEN
  *
  * Modèle de sécurité (à ne jamais dégrader) :
- *  - Authentification par jeton long (VM_API_TOKEN, ≥ 32 caractères),
- *    comparaison à temps constant (crypto.timingSafeEqual).
- *  - Aucune interpolation dans un shell côté runner : tout passe par
- *    spawn('ssh', [...]) avec le script invité envoyé sur stdin (bash -s).
- *  - Les données dynamiques traversent en base64 strict ; les identifiants
- *    (noms de touches, applications) sont validés par liste blanche stricte.
- *  - Toutes les réponses portent l'en-tête X-Linux-Daemon: 1 (le Worker en
- *    dépend pour distinguer un démon absent d'une erreur légitime).
+ *  - API : jeton long (VM_API_TOKEN, ≥ 32 car.), comparaison à temps constant.
+ *  - Aucune interpolation shell côté runner : spawn('ssh', [...]) + scripts
+ *    invités par stdin (bash -s), données en base64 strict, listes blanches.
+ *  - Chaque réponse API porte X-Linux-Daemon: 1 (le Worker en dépend).
  */
 const http = require('http');
+const net = require('net');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 
@@ -25,6 +30,7 @@ if (secret.length < 32) throw new Error('VM_API_TOKEN absent ou trop court (≥ 
 
 const HOST = process.env.AIOS_BRIDGE_HOST || '127.0.0.1';
 const PORT = Number(process.env.AIOS_BRIDGE_PORT || 3001);
+const VNC_UPSTREAM = Number(process.env.AIOS_VNC_UPSTREAM_PORT || 6080);
 const SSH_KEY = process.env.AIOS_SSH_KEY || '';
 const KNOWN_HOSTS = process.env.AIOS_KNOWN_HOSTS || '';
 const SSH_PORT = process.env.AIOS_SSH_PORT || '22222';
@@ -49,30 +55,84 @@ function send(res, status, obj, extraHeaders) {
   });
   res.end(body);
 }
+function fail(res, status, error) { send(res, status, { ok: false, error }); }
+function b64(s) { return Buffer.from(s, 'utf8').toString('base64'); }
 
-function fail(res, status, error) {
-  send(res, status, { ok: false, error });
+// ---------------------------------------------------------------------------
+// Autorisation du bureau (jeton signé HMAC, jeton brut, cookie, Basic)
+// ---------------------------------------------------------------------------
+function verifyGrant(value) {
+  if (typeof value !== 'string' || !value) return false;
+  if (value === secret) return true; // jeton brut
+  const m = value.match(/^(\d{10})\.([a-f0-9]{64})$/);
+  if (!m) return false;
+  const exp = Number(m[1]);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = crypto.createHmac('sha256', secret).update(String(exp)).digest('hex');
+  const a = Buffer.from(expected), b = Buffer.from(m[2]);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function b64(s) {
-  return Buffer.from(s, 'utf8').toString('base64');
+function parseCookies(header) {
+  const out = {};
+  for (const part of String(header || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
 }
 
-/**
- * Exécute un script bash dans l'invité via ssh + stdin (aucun shell côté runner).
- * Retourne { code, stdout, stderr } (tampons limités).
- */
-function runGuest(script, { timeoutMs = 30000, maxOut = MAX_TEXT_OUT, input = null } = {}) {
+function desktopAuthorized(req) {
+  const url = new URL(req.url, 'http://x');
+  if (verifyGrant(url.searchParams.get('s'))) return true;
+  if (verifyGrant(url.searchParams.get('tok'))) return true;
+  if (verifyGrant(parseCookies(req.headers.cookie).aios_s)) return true;
+  const auth = String(req.headers.authorization || '');
+  const basic = auth.match(/^Basic\s+(.+)$/i);
+  if (basic) {
+    const decoded = Buffer.from(basic[1], 'base64').toString('utf8');
+    const i = decoded.indexOf(':');
+    if (i >= 0 && verifyGrant(decoded.slice(i + 1))) return true;
+  }
+  return false;
+}
+
+const LOGIN_PAGE = `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI OS — Bureau</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#fff;color:#111827;
+       display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .box{width:320px;text-align:center}
+  h1{font-size:20px;font-weight:600;margin:0 0 6px}
+  p{color:#6b7280;font-size:13px;line-height:1.5;margin:0 0 18px}
+  input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;
+        box-sizing:border-box;margin-bottom:10px}
+  button{width:100%;padding:10px;border:0;border-radius:8px;background:#2563eb;color:#fff;
+         font-size:14px;font-weight:600;cursor:pointer}
+  a{color:#2563eb;text-decoration:none}
+</style></head><body>
+<div class="box">
+  <h1>AI OS — Bureau</h1>
+  <p>Pour ouvrir le bureau interactif, passez par le portail avec votre code&nbsp;:<br>
+  <a href="https://ai-os.hugdu77777.workers.dev/?target=linux">ai-os.hugdu77777.workers.dev/?target=linux</a></p>
+  <form method="GET" action="/">
+    <input type="password" name="tok" placeholder="Jeton d'accès (usage avancé)" autocomplete="off">
+    <button type="submit">Ouvrir le bureau</button>
+  </form>
+</div></body></html>`;
+
+// ---------------------------------------------------------------------------
+// Commandes invitées via ssh + stdin (aucun shell côté runner)
+// ---------------------------------------------------------------------------
+function runGuest(script, { timeoutMs = 30000, maxOut = MAX_TEXT_OUT } = {}) {
   return new Promise((resolve) => {
     const args = [
-      '-i', SSH_KEY,
-      '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`,
-      '-o', 'BatchMode=yes',
-      '-o', 'ConnectTimeout=10',
-      '-p', SSH_PORT,
-      `${GUEST_USER}@127.0.0.1`,
-      'bash', '-s',
+      '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`, '-o', 'BatchMode=yes',
+      '-o', 'ConnectTimeout=10', '-p', SSH_PORT,
+      `${GUEST_USER}@127.0.0.1`, 'bash', '-s',
     ];
     const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = [], err = [], outSize = 0, errSize = 0, killed = false;
@@ -82,44 +142,65 @@ function runGuest(script, { timeoutMs = 30000, maxOut = MAX_TEXT_OUT, input = nu
     child.on('error', () => { clearTimeout(timer); resolve({ code: -1, stdout: '', stderr: 'ssh failure' }); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({
-        code: killed ? -2 : (code === null ? -1 : code),
-        stdout: Buffer.concat(out).toString('utf8'),
-        stderr: Buffer.concat(err).toString('utf8'),
-      });
+      resolve({ code: killed ? -2 : (code === null ? -1 : code), stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
     });
     child.stdin.on('error', () => {});
-    if (input !== null && input !== undefined) child.stdin.end(input);
-    else child.stdin.end(script);
+    child.stdin.end(script);
   });
 }
 
-/** Vérifie qu'un chemin reste strictement dans le domicile de l'utilisateur invité. */
 function guestPath(raw) {
   if (typeof raw !== 'string' || !raw) return null;
   const p = require('path').posix.resolve(raw);
   if (p !== GUEST_HOME && !p.startsWith(GUEST_HOME + '/')) return null;
   return p;
 }
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;
-    req.on('data', (d) => {
-      size += d.length;
-      if (size > MAX_BODY) { reject(new Error('body too large')); req.destroy(); return; }
-      chunks.push(d);
-    });
+    req.on('data', (d) => { size += d.length; if (size > MAX_BODY) { reject(new Error('body too large')); req.destroy(); return; } chunks.push(d); });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }
-
 const GUEST_GUARD = `case "$P" in ${GUEST_HOME}|${GUEST_HOME}/*) : ;; *) echo 'chemin interdit' >&2; exit 9 ;; esac`;
 
+// ---------------------------------------------------------------------------
+// Proxy bureau : HTTP vers noVNC (127.0.0.1:6080, relié à l'invité par un
+// forward SSH persistent) + WebSocket (/websockify).
+// ---------------------------------------------------------------------------
+function proxyDesktopHttp(req, res) {
+  const upstream = http.request({
+    host: '127.0.0.1', port: VNC_UPSTREAM, path: req.url, method: req.method,
+    headers: { ...req.headers, host: `127.0.0.1:${VNC_UPSTREAM}` },
+  }, (up) => {
+    res.writeHead(up.statusCode || 502, up.headers);
+    up.pipe(res);
+  });
+  upstream.on('error', () => { if (!res.headersSent) fail(res, 502, 'Flux bureau indisponible (noVNC non joignable)'); else res.end(); });
+  req.pipe(upstream);
+}
+
+function proxyDesktopWs(req, socket, head) {
+  const up = net.connect(VNC_UPSTREAM, '127.0.0.1', () => {
+    const lines = [`${req.method} ${req.url} HTTP/1.1`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    up.write(lines.join('\r\n') + '\r\n\r\n');
+    if (head && head.length) up.write(head);
+    socket.pipe(up);
+    up.pipe(socket);
+  });
+  const kill = () => { up.destroy(); socket.destroy(); };
+  up.on('error', kill);
+  socket.on('error', kill);
+}
+
+// ---------------------------------------------------------------------------
+// Routes API
+// ---------------------------------------------------------------------------
 const routes = {
   'GET /health': async (req, res) => {
-    send(res, 200, { ok: true, bridge: 'aios-interaction', version: 1, display: DISPLAY, home: GUEST_HOME });
+    send(res, 200, { ok: true, bridge: 'aios-interaction', version: 2, display: DISPLAY, home: GUEST_HOME });
   },
 
   'GET /api/linux/status': async (req, res) => {
@@ -127,7 +208,8 @@ const routes = {
 printf 'uptime=%s\\n' "$(cut -d' ' -f1 /proc/uptime)"
 pgrep -x Xvfb >/dev/null && echo xvfb=on || echo xvfb=off
 pgrep -x xfce4-session >/dev/null && echo xfce=on || echo xfce=off
-for t in scrot xdotool xclip xsel wmctrl import; do command -v "$t" >/dev/null && echo "tool_$t=on" || echo "tool_$t=off"; done`, { timeoutMs: 15000 });
+pgrep -x x11vnc >/dev/null && echo x11vnc=on || echo x11vnc=off
+for t in scrot xdotool xclip xsel wmctrl import websockify; do command -v "$t" >/dev/null && echo "tool_$t=on" || echo "tool_$t=off"; done`, { timeoutMs: 15000 });
     const state = {};
     for (const line of r.stdout.split('\n')) {
       const m = line.match(/^([a-z_]+)=(.+)$/);
@@ -147,12 +229,9 @@ df -h / | tail -1`, { timeoutMs: 15000 });
 
   'GET /api/linux/screenshot': async (req, res) => {
     const args = [
-      '-i', SSH_KEY,
-      '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`,
-      '-o', 'BatchMode=yes',
-      '-o', 'ConnectTimeout=10',
-      '-p', SSH_PORT,
+      '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`, '-o', 'BatchMode=yes',
+      '-o', 'ConnectTimeout=10', '-p', SSH_PORT,
       `${GUEST_USER}@127.0.0.1`,
       `DISPLAY=${DISPLAY} scrot -o /tmp/aios-screenshot.png && cat /tmp/aios-screenshot.png`,
     ];
@@ -292,20 +371,36 @@ printf 'launched=%s\\n' "$APP"`, { timeoutMs: 15000 });
     send(res, r.code === 0 ? 200 : 502, { ok: r.code === 0, processes: r.stdout });
   },
 };
-
-// Alias /api/v1/* → mêmes gestionnaires que /api/linux/*
 for (const key of Object.keys(routes)) {
   if (key.includes('/api/linux/')) routes[key.replace('/api/linux/', '/api/v1/')] = routes[key];
 }
 
-http.createServer(async (req, res) => {
+// ---------------------------------------------------------------------------
+// Serveur
+// ---------------------------------------------------------------------------
+const server = http.createServer(async (req, res) => {
   try {
+    const path = req.url.split('?')[0].replace(/\/+$/, '') || '/';
+
+    // 1. Bureau interactif (/, et les assets noVNC)
+    if (path === '/' || !path.startsWith('/api/')) {
+      if (!desktopAuthorized(req)) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(LOGIN_PAGE);
+      }
+      if (path === '/') {
+        res.writeHead(302, { Location: '/vnc.html?autoconnect=true&resize=scale&path=websockify', 'Set-Cookie': grantCookie(req) });
+        return res.end();
+      }
+      return proxyDesktopHttp(req, res);
+    }
+
+    // 2. API : jeton Bearer (usage Worker)
     const given = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const a = Buffer.from(given), b = Buffer.from(secret);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       return fail(res, 401, 'Unauthorized');
     }
-    const path = req.url.split('?')[0].replace(/\/+$/, '') || '/';
     const handler = routes[`${req.method} ${path}`];
     if (!handler) {
       return send(res, 404, {
@@ -318,6 +413,25 @@ http.createServer(async (req, res) => {
   } catch (e) {
     if (!res.writableEnded) fail(res, 500, e.message || 'internal error');
   }
-}).listen(PORT, HOST, () => {
-  console.log(`AI OS interaction bridge ready on ${HOST}:${PORT} (display ${DISPLAY})`);
+});
+
+function grantCookie(req) {
+  const url = new URL(req.url, 'http://x');
+  const v = url.searchParams.get('s') || url.searchParams.get('tok');
+  if (!v || !verifyGrant(v)) return 'aios_s=; Path=/; Max-Age=0';
+  return `aios_s=${encodeURIComponent(v)}; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax`;
+}
+
+server.on('upgrade', (req, socket, head) => {
+  const path = req.url.split('?')[0];
+  if (!path.startsWith('/websockify')) return socket.destroy();
+  if (!desktopAuthorized(req)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    return socket.destroy();
+  }
+  proxyDesktopWs(req, socket, head);
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`AI OS bridge ready on ${HOST}:${PORT} — bureau interactif + API (display ${DISPLAY})`);
 });

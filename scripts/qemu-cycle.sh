@@ -54,6 +54,13 @@ start_tunnel() {
   echo $! > "$AIOS_STATE_DIR/tunnel.pid"
 }
 
+# Forward SSH persistent : runner:6080 → invité:6080 (noVNC/websockify).
+start_vnc_forward() {
+  nohup ssh "${sshopts[@]}" -N -L 6080:127.0.0.1:6080 "$AIOS_GUEST_USER@127.0.0.1" \
+    </dev/null >"$AIOS_WORK_DIR/vncfwd.log" 2>&1 &
+  echo $! > "$AIOS_STATE_DIR/vncfwd.pid"
+}
+
 wait_tunnel_url() {
   local t
   for _ in $(seq 1 90); do
@@ -75,6 +82,10 @@ monitor_loop() {
     if ! pid_alive "$(file_pid bridge.pid)"; then
       aios_warn "Pont d'interaction arrêté : redémarrage."
       start_bridge
+    fi
+    if ! pid_alive "$(file_pid vncfwd.pid)"; then
+      aios_warn "Forward du flux bureau arrêté : redémarrage."
+      start_vnc_forward
     fi
     if ! pid_alive "$(file_pid tunnel.pid)"; then
       aios_warn "Tunnel arrêté : redémarrage et republication."
@@ -165,19 +176,22 @@ boot)
 
 install-desktop)
   aios_guest_ensure_desktop sshopts || aios_warn "Installation incomplète — certaines routes de l'API échoueront."
+  aios_guest_ensure_stream sshopts || true
   aios_guest_start_desktop sshopts
-  aios_log "Bureau X démarré (Xvfb $AIOS_GUEST_DISPLAY, XFCE)."
+  aios_guest_start_stream sshopts
+  aios_log "Bureau X démarré (Xvfb $AIOS_GUEST_DISPLAY, XFCE) + flux interactif (x11vnc/noVNC)."
   ;;
 
 bridge)
   aios_require_env VM_API_TOKEN
   start_bridge
+  start_vnc_forward
   for _ in $(seq 1 15); do
     curl -sf --max-time 2 -H "Authorization: Bearer $VM_API_TOKEN" "http://$AIOS_BRIDGE_HOST:$AIOS_BRIDGE_PORT/health" >/dev/null && break
     sleep 1
   done
   curl -s --max-time 2 -H "Authorization: Bearer $VM_API_TOKEN" "http://$AIOS_BRIDGE_HOST:$AIOS_BRIDGE_PORT/health" || aios_die "Pont d'interaction injoignable."
-  aios_log "Pont d'interaction opérationnel (port $AIOS_BRIDGE_PORT)."
+  aios_log "Pont d'interaction opérationnel (port $AIOS_BRIDGE_PORT, flux bureau via forward SSH)."
   ;;
 
 tunnel)
@@ -259,6 +273,7 @@ stop)
   bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"
   kill "$(file_pid bridge.pid)" 2>/dev/null || true
   kill "$(file_pid tunnel.pid)" 2>/dev/null || true
+  kill "$(file_pid vncfwd.pid)" 2>/dev/null || true
   aios_log "Cycle terminé : checkpoint publié, services arrêtés."
   ;;
 

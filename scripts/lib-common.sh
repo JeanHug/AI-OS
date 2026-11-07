@@ -97,6 +97,12 @@ aios_guest_packages() {
     python3 git
 }
 
+# Flux bureau interactif (best-effort : installé séparément pour qu'une
+# différence de nom de paquet ne bloque jamais les outils principaux).
+aios_guest_stream_packages() {
+  printf '%s\n' x11vnc novnc websockify
+}
+
 
 # ---------------------------------------------------------------------------
 # SSH vers l'invité — TOUTES les commandes invitées passent par aios_guest_ssh,
@@ -154,6 +160,27 @@ aios_guest_ensure_desktop() {
   aios_guest_ssh "$1" 300 'sudo apt-get update -qq -o DPkg::Lock::Timeout=300' || true
   aios_guest_ssh "$1" 420 "$install_cmd" && return 0
   return 1
+}
+
+# Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
+# best-effort : n'échoue jamais l'étape.
+aios_guest_ensure_stream() {
+  local -a spkgs; mapfile -t spkgs < <(aios_guest_stream_packages)
+  if aios_guest_ssh "$1" 300 "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${spkgs[*]}"; then
+    return 0
+  fi
+  aios_warn "Flux bureau interactif non installé (paquets ${spkgs[*]})."
+  return 1
+}
+
+# Démarrage idempotent du flux interactif dans l'invité : x11vnc (VNC sur
+# l'affichage :99, boucle locale) + websockify/noVNC (port 6080, boucle locale).
+# N'est joignable que par le forward SSH du runner.
+aios_guest_start_stream() {
+  aios_guest_ssh "$1" 30 "command -v x11vnc >/dev/null && command -v websockify >/dev/null || exit 0
+pgrep -x x11vnc >/dev/null || setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null &
+pgrep -f websockify >/dev/null || setsid nohup websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null &
+exit 0" || aios_warn "Flux bureau non démarré dans l'invité."
 }
 
 # Démarrage idempotent du bureau X (Xvfb + XFCE), un daemon par appel, chacun

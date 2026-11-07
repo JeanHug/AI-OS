@@ -105,6 +105,21 @@ orpheline `snapshot` de `JeanHug/ai-os-data-private` (privé).
 La restauration vérifie le `CHECKPOINT` attendu **et** chaque somme SHA256
 avant déchiffrement. Génération unique : la branche est réécrite à chaque cycle.
 
+## Bureau interactif
+
+L'URL du tunnel cloudflared est **le lien interactif** : ouverte dans un
+navigateur, elle affiche le bureau XFCE de la VM (noVNC), pilotable à la
+souris et au clavier. Pas d'API à cette adresse.
+
+- **Voie normale** : `https://ai-os.hugdu77777.workers.dev/?target=linux`
+  (code PIN demandé) → redirection automatique vers le bureau avec un jeton
+  signé valable 4 h, mémorisé par cookie.
+- **Voie directe** : l'URL du tunnel (publiée dans `/api/tunnels`) affiche une
+  page d'accès si le navigateur n'a pas encore d'autorisation.
+
+Le reste — l'API d'interaction — passe uniquement par le **Worker `ai-os`**,
+authentifié par le PIN, qui relaye vers le pont derrière le tunnel.
+
 ## API d'interaction (pont, auth `Bearer VM_API_TOKEN`)
 
 | Route | Rôle |

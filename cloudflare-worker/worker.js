@@ -15,6 +15,21 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
+/**
+ * Jeton d'accès au bureau interactif : <expiration>.<HMAC-SHA256(expiration)>.
+ * Le pont vérifie la signature avec le même VM_API_TOKEN — le secret ne
+ * circule jamais dans l'URL.
+ */
+async function signDesktopGrant(secret) {
+  const exp = Math.floor(Date.now() / 1000) + 14400; // 4 h
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(exp)));
+  const hex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${exp}.${hex}`;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -133,10 +148,16 @@ export default {
 
     const linuxPrimaryUrl = linuxTunnel?.cloudflare || linuxTunnel?.primary || linuxTunnel?.lhrLife || null;
 
-    // 6. Redirection directe si demandée
+    // 6. Lien interactif : ouverture du bureau (jeton signé à usage temporaire)
     const target = url.searchParams.get("target")?.toLowerCase();
     if (target === "linux" && linuxPrimaryUrl) {
-      return Response.redirect(linuxPrimaryUrl, 302);
+      if (!env.VM_API_TOKEN) {
+        return new Response(JSON.stringify({ ok: false, error: "VM_API_TOKEN absent du Worker" }), {
+          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      const grant = await signDesktopGrant(env.VM_API_TOKEN);
+      return Response.redirect(`${linuxPrimaryUrl}/?s=${grant}`, 302);
     }
 
     // 7. Route générale : Tunnels et Statut Global (/ ou /api/tunnels)
