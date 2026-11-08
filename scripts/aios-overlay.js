@@ -3,13 +3,12 @@
  *
  * Ajoute, SANS rien modifier de noVNC (ni ses clics, ni son panneau) :
  *   - le petit bouton flottant plein écran (noir, glyphe blanc centré, déplaçable) ;
- *   - le clavier automatique : ouvert quand un champ texte est actif dans la VM
- *     (AT-SPI) ou quand on tape dessus — TOUJOURS après le clic, jamais pendant
- *     (l'ouverture du clavier ne doit jamais annuler un tap) ; la frappe passe
- *     par le clavier natif de noVNC (celui de son menu) ;
- *   - l'adaptation du bureau à la zone VISIBLE de l'appareil (largeur), jamais
- *     perturbée par l'ouverture du clavier ;
+ *   - l'adaptation du bureau à la zone VISIBLE de l'appareil (largeur), qui ne
+ *     se déclenche jamais à cause du clavier ;
  *   - l'écran qui ne s'éteint pas, une aide brève au premier lancement.
+ *
+ * Le clavier est celui de noVNC (son bouton « Clavier ») — aucun système
+ * d'ouverture automatique n'est superposé.
  *
  * Le jeton de bureau est lu dans l'URL de la page, ou à défaut dans le
  * localStorage / cookie lisible / nom de fenêtre (posés par mobile.html).
@@ -48,8 +47,6 @@
     'font-size:12.5px;font-family:system-ui,sans-serif;color:#eee;opacity:0;transition:opacity .35s;',
     'pointer-events:none;white-space:nowrap}',
     '#aios-pill.aios-show{opacity:1}',
-    '#aios-ime{position:fixed;left:0;right:0;bottom:0;z-index:2040;height:2px;width:100%;opacity:.01;border:0;',
-    'outline:0;background:transparent;color:transparent;font-size:16px}',
     '#aios-tuto{position:fixed;inset:0;z-index:2200;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px}',
     '#aios-tuto.aios-show{display:grid}',
     '#aios-tuto .card{background:#161616;border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:22px;max-width:400px;',
@@ -79,17 +76,15 @@
     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" style="display:block">' +
     '<path id="aios-fsicon" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>'
   );
-  var ime = el('<textarea id="aios-ime" autocapitalize="off" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>');
   var tuto = el(
     '<div id="aios-tuto"><div class="card"><h2>Piloter le bureau au doigt</h2><ul>' +
     '<li>Tapez pour cliquer, glissez pour déplacer — noVNC gère les clics nativement.</li>' +
-    '<li>Le clavier du téléphone s’ouvre tout seul dès qu’un champ texte est actif (trois doigts pour forcer).</li>' +
+    '<li>Pour écrire, utilisez le bouton « Clavier » du menu de noVNC.</li>' +
     '<li>Le bureau épouse la largeur de votre écran ; le petit bouton rond passe en plein écran.</li>' +
     '</ul><button id="aios-tutook">Compris</button></div></div>'
   );
   document.body.appendChild(pill);
   document.body.appendChild(fsBtn);
-  document.body.appendChild(ime);
   document.body.appendChild(tuto);
 
   function say(msg, ms) {
@@ -101,164 +96,9 @@
   function buzz(m) { try { navigator.vibrate && navigator.vibrate(m); } catch (e) {} }
 
   // -------------------------------------------------------------------------
-  // Clavier : on utilise EN PRIORITÉ le champ caché natif de noVNC (celui de
-  // son menu « clavier ») — la frappe y est prise en charge par noVNC lui-même.
-  // Repli : champ caché local + touches synthétiques (compatible composition IME).
-  // -------------------------------------------------------------------------
-  var NATIVE_INPUTS = ['#noVNC_keyboardinput', '#noVNC_keyboard_input', '#noVNC_keyboardinputarea'];
-  function nativeInput() {
-    for (var i = 0; i < NATIVE_INPUTS.length; i++) {
-      var e = document.querySelector(NATIVE_INPUTS[i]);
-      if (e) return e;
-    }
-    return null;
-  }
-
-  function fireKey(type, key, code, keyCode) {
-    var target = document.getElementById('noVNC_container') || document.body;
-    var ev = new KeyboardEvent(type, { key: key, code: code, bubbles: true, cancelable: true, view: window });
-    Object.defineProperty(ev, 'keyCode', { get: function () { return keyCode; } });
-    Object.defineProperty(ev, 'which', { get: function () { return keyCode; } });
-    target.dispatchEvent(ev);
-  }
-
-  var kbOpen = false, kbManual = false, lastFocus = 'none', lastRect = null;
-
-  function openKb() {
-    kbOpen = true;
-    var t = nativeInput();
-    try {
-      // Un focus() sur un champ déjà focalisé ne rouvre AUCUN clavier :
-      // on défocalise puis on reprend le focus dans le même geste.
-      if (t) {
-        if (document.activeElement === t) t.blur();
-        t.focus({ preventScroll: true });
-        return;
-      }
-      if (document.activeElement === ime) ime.blur();
-      ime.focus({ preventScroll: true });
-      ime.setSelectionRange(0, 0);
-    } catch (e) { try { (t || ime).focus(); } catch (e2) {} }
-  }
-  function closeKb() {
-    kbOpen = false;
-    kbManual = false;
-    try { (nativeInput() || ime).blur(); } catch (e) {}
-  }
-
-  // L'état réel du clavier système (ouvert/fermé) se lit dans la hauteur de
-  // la zone visible : si l'utilisateur le ferme lui-même, on suit — sinon le
-  // prochain toucher ne pourrait plus jamais le rouvrir.
-  var maxVH = 0;
-  function syncKbState() {
-    var vv = window.visualViewport;
-    if (!vv) return;
-    if (vv.height > maxVH) maxVH = vv.height;
-    if (maxVH < 200) return;
-    var kbNow = vv.height < maxVH * 0.78;
-    if (!kbNow && kbOpen) {
-      kbOpen = false;
-      kbManual = false;
-    } else if (kbNow && !kbOpen) {
-      kbOpen = true;
-    }
-  }
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', syncKbState);
-    window.visualViewport.addEventListener('scroll', syncKbState);
-  }
-
-  // Repli de frappe : envoi des caractères saisis (la composition IME est gérée).
-  function drainIme() {
-    var v = ime.value;
-    ime.value = '';
-    for (var i = 0; i < v.length; i++) {
-      var ch = v.charAt(i);
-      var cp = ch.charCodeAt(0);
-      if (cp === 10) { fireKey('keydown', 'Enter', 'Enter', 13); fireKey('keyup', 'Enter', 'Enter', 13); continue; }
-      if (cp < 32) continue;
-      var code = cp >= 97 && cp <= 122 ? 'Key' + ch.toUpperCase() : (cp >= 65 && cp <= 90 ? 'Key' + ch : 'Unidentified');
-      fireKey('keydown', ch, code, cp);
-      fireKey('keyup', ch, code, cp);
-    }
-  }
-  ime.addEventListener('input', function (e) { if (!e.isComposing) drainIme(); });
-  ime.addEventListener('compositionend', function () { setTimeout(drainIme, 0); });
-
-  // Ouverture TOUJOURS différée (après le clic en cours, jamais pendant).
-  function scheduleOpen() {
-    clearTimeout(scheduleOpen._t);
-    scheduleOpen._t = setTimeout(function () {
-      syncKbState();
-      if (lastFocus === 'text' && !kbOpen) openKb();
-    }, 420);
-  }
-
-  // -------------------------------------------------------------------------
-  // Détection du focus texte (AT-SPI via le Worker) + ouverture ciblée
-  // -------------------------------------------------------------------------
-  function pollFocus() {
-    if (!sig || document.hidden) return;
-    fetch(apiUrl('/api/desktop/focus'), { method: 'GET' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        var prev = lastFocus;
-        lastFocus = (d && d.focus) || 'none';
-        lastRect = (d && d.rect) || null;
-        syncKbState();
-        if (lastFocus !== 'text' && kbOpen && !kbManual) closeKb();
-        if (prev !== 'text' && lastFocus === 'text' && !kbManual) {
-          // Un champ texte vient d'être activé dans la VM → clavier (après le clic).
-          scheduleOpen();
-        }
-      })
-      .catch(function () {});
-  }
-
-  // Tap détecté : si la zone touchée est le champ texte actif (ouvertures
-  // successives), le clavier se rouvre — sinon les clics restent des clics.
-  function inActiveField(x, y) {
-    if (!lastRect) return false;
-    var c = document.querySelector('#noVNC_container canvas') || document.querySelector('canvas');
-    if (!c) return false;
-    var r = c.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-    var sx = (x - r.left) * (c.width / r.width);
-    var sy = (y - r.top) * (c.height / r.height);
-    return sx >= lastRect[0] && sx <= lastRect[0] + lastRect[2] &&
-           sy >= lastRect[1] && sy <= lastRect[1] + lastRect[3];
-  }
-
-  var tapXY = null;
-  window.addEventListener('touchstart', function (e) {
-    if (e.touches && e.touches.length === 1) {
-      tapXY = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.touches && e.touches.length >= 3) {
-      // Trois doigts : forcer / masquer le clavier.
-      e.preventDefault();
-      e.stopPropagation();
-      kbManual = !kbOpen;
-      if (kbManual) { openKb(); say('Clavier'); } else { closeKb(); say('Clavier masqué'); }
-      tapXY = null;
-      return;
-    }
-    wake();
-    pollFocus();
-    setTimeout(pollFocus, 350);
-    setTimeout(pollFocus, 1200);
-  }, { capture: true, passive: false });
-  window.addEventListener('touchend', function () {
-    var t = tapXY; tapXY = null;
-    if (!t || kbManual) return;
-    syncKbState();
-    if (lastFocus === 'text' && !kbOpen && inActiveField(t.x, t.y)) scheduleOpen();
-  }, { capture: true, passive: true });
-  window.addEventListener('pointerdown', function () { wake(); pollFocus(); }, true);
-  setInterval(function () { syncKbState(); pollFocus(); }, 1300);
-
-  // -------------------------------------------------------------------------
-  // Adaptation à la zone VISIBLE (largeur) — l'ouverture du clavier ne change
-  // que la hauteur : elle ne déclenche donc JAMAIS de redimensionnement.
+  // Adaptation à la zone VISIBLE (largeur) — déclenchée uniquement par un
+  // changement d'affichage (chargement, rotation, plein écran), jamais par
+  // l'ouverture du clavier.
   // -------------------------------------------------------------------------
   var lastW = 0;
   function targetGeom() {
@@ -297,16 +137,10 @@
     // Un changement de hauteur seul = clavier → on n'y touche pas.
     if (window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
   });
-  window.addEventListener('orientationchange', function () {
-    maxVH = 0;
-    setTimeout(adaptScreen, 450);
-  });
-  document.addEventListener('fullscreenchange', function () {
-    setTimeout(adaptScreen, 350);
-    wake();
-  });
+  window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 450); });
+  document.addEventListener('fullscreenchange', function () { setTimeout(adaptScreen, 350); wake(); });
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) { pollFocus(); setTimeout(adaptScreen, 400); }
+    if (!document.hidden) setTimeout(adaptScreen, 400);
   });
 
   // -------------------------------------------------------------------------
@@ -377,6 +211,7 @@
     }).catch(function () {});
   }
   wake();
+  window.addEventListener('pointerdown', wake, true);
 
   // -------------------------------------------------------------------------
   // Tutoriel (première visite)
@@ -394,8 +229,6 @@
   // -------------------------------------------------------------------------
   setTimeout(function () {
     lastW = window.innerWidth;
-    maxVH = window.innerHeight;
-    pollFocus();
     adaptScreen();
     wake();
   }, 1200);
