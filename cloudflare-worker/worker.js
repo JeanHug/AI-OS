@@ -200,9 +200,13 @@ export default {
           "setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &",
           "setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 &",
           "sleep 1.5",
+          'for i in 1 2 3 4 5 6; do ss -ltn | grep -q ":5900 " && ss -ltn | grep -q ":6080 " && break; sleep 1.5; done',
+          'ss -ltn | grep -q ":5900 " || setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &',
+          'ss -ltn | grep -q ":6080 " || setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 &',
+          "sleep 1",
           'xrandr 2>/dev/null | grep -o "current [0-9]* x [0-9]*" || true',
         ].join("\n");
-        const r = await linuxExec(env, script, 60);
+        const r = await linuxExec(env, script, 90);
         return J({ ok: !!(r && r.ok), width: w, height: h, out: String((r && r.stdout) || "").slice(-300) });
       }
 

@@ -119,15 +119,28 @@
       .then(function (g) {
         if (!g || !g.ok) return;
         var t = targetGeom();
-        var ratioBad = Math.abs((g.width / g.height) - (t.w / t.h)) > 0.04;
+        // Décision fondée sur la LARGEUR uniquement (comme demandé) : les
+        // changements de hauteur (clavier, plein écran) ne redémarrent jamais
+        // l'affichage — c'est eux qui déconnectaient noVNC.
         var widthBad = Math.abs(g.width - t.w) > Math.max(60, t.w * 0.10);
-        if (!ratioBad && !widthBad) { resizeAttempts = 0; return; }
+        if (!widthBad) { resizeAttempts = 0; return; }
         resizeAttempts++;
         say('Adaptation de l’écran à votre appareil…', 6000);
         return fetch(apiUrl('/api/desktop/resize'), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({ width: t.w, height: t.h }),
+        }).then(function () {
+          // Le redimensionnement redémarre l'affichage de la VM : la connexion
+          // retombe. On recharge la page juste après pour se reconnecter seul.
+          setTimeout(function () {
+            try {
+              var last = Number(sessionStorage.getItem('aios.reload') || 0);
+              if (Date.now() - last < 90000) return;
+              sessionStorage.setItem('aios.reload', String(Date.now()));
+            } catch (e) {}
+            location.reload();
+          }, 8000);
         });
       })
       .catch(function () {});
@@ -138,7 +151,8 @@
     if (window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
   });
   window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 450); });
-  document.addEventListener('fullscreenchange', function () { setTimeout(adaptScreen, 350); wake(); });
+  // NB : le plein écran ne déclenche PAS d'adaptation — seul un changement de
+  // largeur (rotation / appareil) redémarre l'affichage de la VM.
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) setTimeout(adaptScreen, 400);
   });
