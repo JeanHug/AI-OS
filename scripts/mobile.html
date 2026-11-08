@@ -16,70 +16,53 @@
     overscroll-behavior: none; touch-action: none;
     -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
-    font-family: system-ui, -apple-system, sans-serif;
-    color: #eee;
+    font-family: system-ui, -apple-system, sans-serif; color: #eee;
   }
   #screen { position: fixed; inset: 0; z-index: 1; touch-action: none; }
   #screen canvas { transform-origin: 0 0; }
-
-  /* Voile tactile : capte tous les gestes, noVNC ne voit que nos événements. */
   #touch { position: fixed; inset: 0; z-index: 5; touch-action: none; }
 
-  /* Pastille d'état (jamais de texte technique) */
+  /* Pastille d'état */
   #pill {
     position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); z-index: 30;
     background: rgba(0,0,0,.62); border: 1px solid rgba(255,255,255,.18);
-    border-radius: 999px; padding: 6px 14px; font-size: 12.5px; letter-spacing: .02em;
+    border-radius: 999px; padding: 6px 14px; font-size: 12.5px;
     opacity: 0; transition: opacity .35s; pointer-events: none; white-space: nowrap;
   }
   #pill.show { opacity: 1; }
 
-  /* Bouton flottant plein écran (noir, glyphe blanc, déplaçable au doigt) */
+  /* Témoin de latence (discret) */
+  #lat {
+    position: fixed; top: calc(14px + env(safe-area-inset-top)); left: 12px; z-index: 30;
+    width: 8px; height: 8px; border-radius: 50%; background: #2c7a3f;
+    box-shadow: 0 0 6px rgba(0,0,0,.6); pointer-events: none; opacity: .85;
+  }
+
+  /* Bouton flottant plein écran — petit, noir, glyphe blanc, déplaçable */
   #fs {
-    position: fixed; z-index: 40; width: 52px; height: 52px; border-radius: 50%;
-    background: #000; border: 1.5px solid rgba(255,255,255,.55);
-    box-shadow: 0 4px 16px rgba(0,0,0,.55);
+    position: fixed; z-index: 40; width: 26px; height: 26px; border-radius: 50%;
+    background: #000; border: 1.5px solid rgba(255,255,255,.6);
+    box-shadow: 0 3px 10px rgba(0,0,0,.55);
     display: grid; place-items: center; padding: 0; cursor: pointer;
-    opacity: .62; transition: opacity .25s, transform .15s;
-    right: calc(12px + env(safe-area-inset-right)); top: 38%;
+    opacity: .65; transition: opacity .25s;
+    right: calc(10px + env(safe-area-inset-right)); top: 38%;
   }
-  #fs:active { transform: scale(.93); }
+  #fs::before { content: ""; position: absolute; inset: -11px; } /* zone de contact */
   #fs.hot { opacity: 1; }
-  #fs svg { width: 26px; height: 26px; display: block; pointer-events: none; }
+  #fs svg { width: 15px; height: 15px; display: block; pointer-events: none; }
 
-  /* Barre d'outils (pouce) */
-  #toolbar {
-    position: fixed; left: 0; right: 0; z-index: 20;
-    bottom: calc(8px + env(safe-area-inset-bottom));
-    display: flex; justify-content: center; gap: 6px;
-    padding: 0 8px; pointer-events: none;
-    transition: transform .3s, opacity .3s;
-  }
-  #toolbar.hidden { transform: translateY(140%); opacity: 0; }
-  #toolbar button {
-    pointer-events: auto;
-    min-width: 58px; height: 48px; border-radius: 14px;
-    background: rgba(18,18,18,.82); color: #eee;
-    border: 1px solid rgba(255,255,255,.16);
-    font-size: 11.5px; line-height: 1.15;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px; padding: 4px 10px;
-  }
-  #toolbar button b { font-size: 15px; font-weight: 500; }
-  #toolbar button.on { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.4); }
-
-  /* Barre clavier (accessoires, au-dessus du clavier Android) */
+  /* Barre clavier : uniquement quand le clavier s'ouvre (automatique) */
   #kbar {
-    position: fixed; left: 0; right: 0; z-index: 25;
-    bottom: 0; display: none; gap: 5px; overflow-x: auto;
+    position: fixed; left: 0; right: 0; z-index: 25; bottom: 0;
+    display: none; gap: 5px; overflow-x: auto;
     padding: 7px calc(8px + env(safe-area-inset-left)) calc(7px + env(safe-area-inset-bottom));
-    background: rgba(12,12,12,.96); border-top: 1px solid rgba(255,255,255,.14);
+    background: rgba(12,12,12,.97); border-top: 1px solid rgba(255,255,255,.14);
     -webkit-overflow-scrolling: touch;
   }
   #kbar.show { display: flex; }
   #kbar button {
-    flex: 0 0 auto; min-width: 42px; height: 38px; border-radius: 9px;
+    flex: 0 0 auto; min-width: 40px; height: 38px; border-radius: 9px;
     background: #232323; color: #eee; border: 1px solid rgba(255,255,255,.14);
     font-size: 13px; padding: 0 10px;
   }
@@ -89,7 +72,6 @@
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 24;
     height: 1px; width: 100%; opacity: .01; border: 0; outline: 0;
     background: transparent; color: transparent; font-size: 16px;
-    resize: none;
   }
 
   /* Presse-papiers */
@@ -101,7 +83,7 @@
   }
   #clip.show { display: flex; }
   #clip textarea {
-    height: 120px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18);
+    height: 110px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18);
     background: #0c0c0c; color: #eee; font-size: 15px; padding: 10px; resize: none;
   }
   #clip .row { display: flex; gap: 8px; }
@@ -123,14 +105,25 @@
   }
   #tuto h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; }
   #tuto ul { margin: 0 0 18px; padding-left: 20px; }
-  #tuto li { margin: 8px 0; font-size: 14.5px; line-height: 1.45; color: #ddd; }
+  #tuto li { margin: 8px 0; font-size: 14px; line-height: 1.45; color: #ddd; }
   #tuto button {
     width: 100%; height: 46px; border-radius: 12px; border: 0;
     background: #2b5fc7; color: #fff; font-size: 15px;
   }
 
-  #fatal {
+  /* Verrouillage à la reprise */
+  #lock {
     position: fixed; inset: 0; z-index: 70; display: none;
+    background: rgba(0,0,0,.92); place-items: center; text-align: center; padding: 24px;
+  }
+  #lock.show { display: grid; }
+  #lock button {
+    margin-top: 18px; height: 52px; padding: 0 34px; border-radius: 14px; border: 0;
+    background: #2b5fc7; color: #fff; font-size: 16px;
+  }
+
+  #fatal {
+    position: fixed; inset: 0; z-index: 80; display: none;
     place-items: center; text-align: center; padding: 24px; background: #000;
   }
   #fatal.show { display: grid; }
@@ -142,6 +135,7 @@
 <div id="touch"></div>
 
 <div id="pill"></div>
+<div id="lat"></div>
 
 <button id="fs" aria-label="Plein écran">
   <svg id="fsicon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
@@ -149,14 +143,8 @@
   </svg>
 </button>
 
-<div id="toolbar">
-  <button id="bmode"><b>☝</b><span id="lmode">Touch</span></button>
-  <button id="bkey"><b>⌨</b><span>Clavier</span></button>
-  <button id="bclip"><b>📋</b><span>Coller</span></button>
-  <button id="bzoom"><b>1×</b><span>Zoom</span></button>
-</div>
-
 <div id="kbar">
+  <button data-k="hide">⌄</button>
   <button data-k="Esc">Esc</button>
   <button data-k="Tab">Tab</button>
   <button data-k="Ctrl" class="mod">Ctrl</button>
@@ -169,7 +157,11 @@
   <button data-k="Right">→</button>
   <button data-k="Backspace">⌫</button>
   <button data-k="Enter">↵</button>
+  <button data-k="Delete">Suppr</button>
   <button data-k="CAD">Ctrl+Alt+Suppr</button>
+  <button data-k="mode">Mode</button>
+  <button data-k="clip">📋</button>
+  <button data-k="zoom">1×</button>
 </div>
 
 <textarea id="ime" autocapitalize="off" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
@@ -178,7 +170,7 @@
   <textarea id="cliptext" placeholder="Texte à coller dans le bureau…"></textarea>
   <div class="row">
     <button id="clipin" class="primary">Coller dans le bureau</button>
-    <button id="clipout">Récupérer depuis le bureau</button>
+    <button id="clipout">Récupérer du bureau</button>
   </div>
   <div class="row"><button id="clipclose">Fermer</button></div>
 </div>
@@ -187,32 +179,40 @@
   <div class="card">
     <h2>Piloter le bureau au doigt</h2>
     <ul>
-      <li><b>Touch</b> : tapez pour cliquer, glissez pour défiler une page, appui maintenu pour glisser un objet.</li>
-      <li><b>Pavé</b> : le doigt déplace le curseur, tape pour cliquer.</li>
-      <li>À deux doigts : pincez pour zoomer, glissez pour défiler.</li>
-      <li>Le bouton rond à droite passe en plein écran — déplacez-le où vous voulez.</li>
+      <li>Tapez pour cliquer ; <b>glissez</b> pour défiler une page ; appui maintenu puis glisser pour déplacer un élément ; appui long = clic droit.</li>
+      <li>À deux doigts : pincez pour zoomer, glissez pour défiler (ou déplacer la vue zoomée), deux taps = clic droit, deux double-taps = zoom 1×.</li>
+      <li><b>Le clavier s'ouvre tout seul</b> dès qu'un champ texte est actif — trois doigts pour le forcer.</li>
+      <li>L'écran s'adapte automatiquement au format de votre appareil.</li>
     </ul>
     <button id="tutook">Compris</button>
+  </div>
+</div>
+
+<div id="lock">
+  <div>
+    <p id="locktext">Session verrouillée</p>
+    <button id="lockbtn">Déverrouiller</button>
   </div>
 </div>
 
 <div id="fatal"><p id="fataltext">Connexion au bureau impossible.<br>Rouvrez votre lien d’accès.</p></div>
 
 <script type="module">
-// ---------------------------------------------------------------------------
-// Client bureau mobile — noVNC via /core/rfb.js (même origine, même auth).
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Client bureau mobile v2 — gestes, adaptation d'écran, clavier automatique.
+// noVNC via /core/rfb.js ; API bureau via le Worker ai-os (jeton ?s=).
+// ===========================================================================
 const $ = (s) => document.querySelector(s);
+const API = 'https://ai-os.hugdu77777.workers.dev';
 
 const params = new URLSearchParams(location.search);
 const sig = params.get('s') || params.get('tok') || '';
 
-// 1. Obtenir le cookie d'autorisation (la redirection racine le pose).
+// Cookie d'autorisation (la redirection racine le pose).
 if (sig) {
   try { await fetch('/?s=' + encodeURIComponent(sig), { redirect: 'manual' }); } catch (e) {}
 }
 
-// 2. Charger noVNC (nécessite le cookie).
 let RFB;
 try {
   ({ default: RFB } = await import('/core/rfb.js'));
@@ -222,29 +222,19 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// État
+// État général
 // ---------------------------------------------------------------------------
 const screenEl = $('#screen');
 const touchEl = $('#touch');
 let rfb = null, canvas = null, connected = false;
-let mode = localStorage.getItem('aios.mode') === 'trackpad' ? 'trackpad' : 'direct';
-let z = 1, px = 0, py = 0;              // zoom + pan (transform CSS du canvas)
+let z = 1, px = 0, py = 0;
 let remoteClip = '';
 let wakeLock = null;
-let vx = innerWidth / 2, vy = innerHeight / 2;   // curseur virtuel (mode pavé)
+let resizeAttempts = 0;
+let kbManual = false;          // clavier forcé à la main (3 doigts)
+let kbOpen = false;
 
-function initVC() {
-  const r = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
-  vx = r.left + r.width / 2; vy = r.top + r.height / 2;
-}
-function clampVC() {
-  if (!canvas) return;
-  const r = canvas.getBoundingClientRect();
-  vx = Math.max(r.left, Math.min(r.right, vx));
-  vy = Math.max(r.top, Math.min(r.bottom, vy));
-}
 const sticky = { Ctrl: false, Alt: false, Shift: false };
-
 const KEYS = {
   Esc: [0xFF1B, 'Escape'], Tab: [0xFF09, 'Tab'], Ctrl: [0xFFE3, 'ControlLeft'],
   Alt: [0xFFE9, 'AltLeft'], Shift: [0xFFE1, 'ShiftLeft'], Super: [0xFFEB, 'MetaLeft'],
@@ -262,8 +252,95 @@ function pill(msg, ms = 2200) {
 }
 function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
 
+// Mode de gestes : auto = tactile à 1×, pavé dès que zoomé ; choix manuel possible.
+let modePref = localStorage.getItem('aios.mode') || 'auto';
+function activeMode() {
+  if (modePref === 'auto') return z > 1.15 ? 'trackpad' : 'direct';
+  return modePref;
+}
+
 // ---------------------------------------------------------------------------
-// Connexion
+// API bureau (Worker ai-os, jeton de bureau ?s=)
+// ---------------------------------------------------------------------------
+function apiUrl(path) {
+  return API + path + (sig ? (path.includes('?') ? '&' : '?') + 's=' + encodeURIComponent(sig) : '');
+}
+async function apiGet(path) {
+  const r = await fetch(apiUrl(path), { method: 'GET' });
+  return r.json();
+}
+async function apiPost(path, obj) {
+  const r = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(obj),
+  });
+  return r.json();
+}
+
+// ---------------------------------------------------------------------------
+// Adaptation de l'écran à l'appareil (comparaison de largeur + format)
+// ---------------------------------------------------------------------------
+function targetGeom() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w = Math.round(innerWidth * dpr);
+  let h = Math.round(innerHeight * dpr);
+  const long = Math.max(w, h);
+  if (long > 2560) { const k = 2560 / long; w = Math.round(w * k); h = Math.round(h * k); }
+  w = Math.max(480, w - (w % 2)); h = Math.max(320, h - (h % 2));
+  return { w, h };
+}
+
+async function adaptScreen(force) {
+  if (!sig) return;
+  try {
+    const g = await apiGet('/api/desktop/geom');
+    const t = targetGeom();
+    if (!g.ok) return;
+    const ratioBad = Math.abs((g.width / g.height) - (t.w / t.h)) > 0.06;
+    const widthBad = Math.abs(g.width - t.w) > Math.max(60, t.w * 0.12);
+    if (!force && !ratioBad && !widthBad) { resizeAttempts = 0; return; }
+    if (resizeAttempts >= 2) return;
+    resizeAttempts++;
+    pill('Adaptation de l’écran à votre appareil…', 6000);
+    await apiPost('/api/desktop/resize', { width: t.w, height: t.h });
+    // Le flux VNC redémarre : la reconnexion automatique prend le relais.
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Clavier automatique : ouverture dès qu'un champ texte a le focus
+// ---------------------------------------------------------------------------
+async function pollFocus() {
+  if (!sig || document.hidden) return;
+  const t0 = performance.now();
+  try {
+    const d = await apiGet('/api/desktop/focus');
+    const rtt = performance.now() - t0;
+    const dot = $('#lat');
+    dot.style.background = rtt < 250 ? '#2c7a3f' : (rtt < 700 ? '#b08a22' : '#a33');
+    if (!kbManual) setKeyboard(d.focus === 'text');
+  } catch (e) {
+    $('#lat').style.background = '#a33';
+  }
+}
+function setKeyboard(open) {
+  if (open === kbOpen) return;
+  kbOpen = open;
+  const ime = $('#ime');
+  if (open) {
+    ime.focus();
+    $('#kbar').classList.add('show');
+  } else {
+    ime.blur();
+    $('#kbar').classList.remove('show');
+  }
+}
+setInterval(pollFocus, 1300);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollFocus(); wake(); } });
+
+// ---------------------------------------------------------------------------
+// Connexion VNC
 // ---------------------------------------------------------------------------
 const wsUrl = 'wss://' + location.host + '/websockify' + (sig ? '?s=' + encodeURIComponent(sig) : '');
 
@@ -280,6 +357,8 @@ function connect() {
     initVC();
     pill('Connecté');
     wake();
+    adaptScreen(false);
+    pollFocus();
   });
   rfb.addEventListener('disconnect', (e) => {
     connected = false;
@@ -296,13 +375,22 @@ function connect() {
 async function wake() {
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
 }
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && connected) wake();
-});
 
 // ---------------------------------------------------------------------------
-// Vue : zoom + pan (transform CSS, les événements gardent les coord. écran)
+// Vue : zoom + pan
 // ---------------------------------------------------------------------------
+let vx = innerWidth / 2, vy = innerHeight / 2;
+
+function initVC() {
+  const r = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
+  vx = r.left + r.width / 2; vy = r.top + r.height / 2;
+}
+function clampVC() {
+  if (!canvas) return;
+  const r = canvas.getBoundingClientRect();
+  vx = Math.max(r.left, Math.min(r.right, vx));
+  vy = Math.max(r.top, Math.min(r.bottom, vy));
+}
 function baseRect() {
   const t = canvas.style.transform;
   canvas.style.transform = 'none';
@@ -325,21 +413,26 @@ function applyView() {
   canvas.style.transformOrigin = '0 0';
   canvas.style.transform = 'translate(' + px + 'px,' + py + 'px) scale(' + z + ')';
 }
-function resetView() {
-  z = 1; px = 0; py = 0;
+function resetView() { z = 1; px = 0; py = 0; applyView(); }
+
+let resizeTimer = null;
+addEventListener('resize', () => {
   applyView();
-}
-addEventListener('resize', applyView);
-addEventListener('orientationchange', () => setTimeout(applyView, 120));
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => adaptScreen(false), 1500);
+});
+addEventListener('orientationchange', () => setTimeout(() => { applyView(); adaptScreen(false); }, 250));
 
 // ---------------------------------------------------------------------------
-// Événements souris/molette synthétiques (noVNC écoute le canvas)
+// Événements synthétiques (corrigé : buttons=0 sauf enfonçage réel)
 // ---------------------------------------------------------------------------
 function mouse(type, x, y, button) {
   if (!canvas) return;
+  const btn = button || 0;
+  const buttons = type === 'mousedown' ? (1 << btn) : 0;
   canvas.dispatchEvent(new MouseEvent(type, {
-    clientX: x, clientY: y, button: button || 0, buttons: type === 'mouseup' ? 0 : 1 << (button || 0),
-    bubbles: true, cancelable: true, view: window, detail: 1,
+    clientX: x, clientY: y, button: btn, buttons,
+    bubbles: true, cancelable: true, view: window,
   }));
 }
 function wheelAt(dx, dy, x, y) {
@@ -355,10 +448,10 @@ function rightAt(x, y) { mouse('mousemove', x, y, 0); mouse('mousedown', x, y, 2
 // ---------------------------------------------------------------------------
 // Gestes tactiles
 // ---------------------------------------------------------------------------
-const S = {};                    // doigts par identifiant
-let g = null;                    // geste courant
-let longTimer = null, armedDrag = false;
-let lastTapT = 0;
+const S = {};
+let g = null;
+let armTimer = null, armedDrag = false;
+let lastTwoTap = 0;
 
 function d2(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -366,27 +459,35 @@ function fingers() { return Object.keys(S).map((k) => S[k]); }
 
 touchEl.addEventListener('touchstart', (e) => {
   e.preventDefault(); e.stopPropagation();
-  for (const t of e.changedTouches) S[t.identifier] = { x: t.clientX, y: t.clientY, x0: t.clientX, y0: t.clientY, t0: performance.now() };
+  for (const t of e.changedTouches) {
+    S[t.identifier] = {
+      x: t.clientX, y: t.clientY, x0: t.clientX, y0: t.clientY,
+      t0: performance.now(), lx: t.clientX, ly: t.clientY, stillSince: performance.now(),
+    };
+  }
   const f = fingers();
   armedDrag = false;
+  clearTimeout(armTimer);
+
   if (f.length === 1) {
-    g = { kind: 'p1', moved: 0 };
-    clearTimeout(longTimer);
-    longTimer = setTimeout(() => {
-      // Appui maintenu sans déplacement : arme le glisser (sinon clic droit au relâchement).
-      if (g && g.kind === 'p1' && g.moved < 12) { armedDrag = true; buzz(12); pill('Glisser', 900); }
-    }, 320);
+    g = { kind: 'p1', moved: 0, lx: f[0].x, ly: f[0].y, vx0: 0, vy0: 0, vt: performance.now() };
+    armTimer = setTimeout(() => {
+      // Appui vraiment immobile → arme le glisser (sinon ce sera un clic).
+      if (g && g.kind === 'p1' && g.moved < 25 && (performance.now() - (S[Object.keys(S)[0]] ? S[Object.keys(S)[0]].stillSince : 0)) > 260) {
+        armedDrag = true; buzz(12);
+      }
+    }, 480);
   } else if (f.length === 2) {
-    clearTimeout(longTimer);
     const b = canvas ? baseRect() : null;
+    const m = mid(f[0], f[1]);
     g = {
-      kind: 'p2', moved: 0,
-      d0: d2(f[0], f[1]), mid0: mid(f[0], f[1]),
-      z0: z, px0: px, py0: py, b,
-      a: b ? { x: (mid(f[0], f[1]).x - b.left - px) / z, y: (mid(f[0], f[1]).y - b.top - py) / z } : null,
+      kind: 'p2', moved: 0, lx: m.x, ly: m.y,
+      d0: d2(f[0], f[1]), mid0: m, z0: z, px0: px, py0: py, b,
+      a: b ? { x: (m.x - b.left - px) / z, y: (m.y - b.top - py) / z } : null,
     };
+  } else if (f.length === 3) {
+    g = { kind: 'p3', moved: 0 };
   } else {
-    clearTimeout(longTimer);
     g = { kind: 'multi' };
   }
 }, { passive: false });
@@ -397,63 +498,65 @@ touchEl.addEventListener('touchmove', (e) => {
   for (const t of e.changedTouches) {
     const s = S[t.identifier];
     if (!s) continue;
+    const step = Math.hypot(t.clientX - s.x, t.clientY - s.y);
+    if (step > 4) s.stillSince = now;
     s.x = t.clientX; s.y = t.clientY;
   }
   const f = fingers();
   if (!g || f.length === 0) return;
 
-  if (g.kind === 'p1' && f.length === 1) {
+  if (f.length === 1 && (g.kind === 'p1' || g.kind === 'move1' || g.kind === 'scroll1' || g.dragging)) {
     const s = f[0];
     const total = Math.hypot(s.x - s.x0, s.y - s.y0);
     g.moved = Math.max(g.moved, total);
 
     if (armedDrag) {
-      // Glisser après appui maintenu : bouton gauche tenu.
       if (!g.dragging) {
         g.dragging = true;
-        if (mode === 'trackpad') { g.last = { x: s.x, y: s.y }; mouse('mousemove', vx, vy, 0); mouse('mousedown', vx, vy, 0); }
-        else { mouse('mousemove', s.x, s.y, 0); mouse('mousedown', s.x, s.y, 0); }
-      } else if (mode === 'trackpad') {
-        vx += (s.x - g.last.x) * 1.25; vy += (s.y - g.last.y) * 1.25;
-        g.last = { x: s.x, y: s.y };
+        g.dragStart = activeMode() === 'trackpad' ? { x: vx, y: vy } : { x: s.x, y: s.y };
+        mouse('mousemove', g.dragStart.x, g.dragStart.y, 0);
+        mouse('mousedown', g.dragStart.x, g.dragStart.y, 0);
+      }
+      if (activeMode() === 'trackpad') {
+        vx += (s.x - g.lx) * 1.25; vy += (s.y - g.ly) * 1.25;
         clampVC();
         mouse('mousemove', vx, vy, 0);
       } else {
         mouse('mousemove', s.x, s.y, 0);
       }
+      g.lx = s.x; g.ly = s.y;
       return;
     }
-    if (g.kind === 'p1' && total > 10 && !g.decided) {
+
+    if (!g.decided && total > 10) {
       g.decided = true;
-      clearTimeout(longTimer);
-      g.kind = mode === 'trackpad' ? 'move1' : 'scroll1';
-      if (g.kind === 'move1') g.last = { x: s.x, y: s.y };
+      clearTimeout(armTimer);
+      g.kind = activeMode() === 'trackpad' ? 'move1' : 'scroll1';
+      g.lx = s.x; g.ly = s.y;
     }
     if (g.kind === 'move1') {
-      // Pavé : déplacement relatif du curseur (il ne saute pas sous le doigt).
-      vx += (s.x - g.last.x) * 1.25; vy += (s.y - g.last.y) * 1.25;
-      g.last = { x: s.x, y: s.y };
+      vx += (s.x - g.lx) * 1.25; vy += (s.y - g.ly) * 1.25;
+      g.lx = s.x; g.ly = s.y;
       clampVC();
       mouse('mousemove', vx, vy, 0);
     } else if (g.kind === 'scroll1') {
-      const dy = s.y - (g.ly !== undefined ? g.ly : s.y);
-      const dx = s.x - (g.lx !== undefined ? g.lx : s.x);
+      const dy = s.y - g.ly, dx = s.x - g.lx;
       g.lx = s.x; g.ly = s.y;
-      // Le glissement définit la page : vers le bas → la page descend.
+      g.vy0 = dy; g.vx0 = dx; g.vt = now;
       if (dy) wheelAt(0, -dy * 1.15, s.x, s.y);
       if (dx) wheelAt(-dx * 1.15, 0, s.x, s.y);
     }
     return;
   }
 
-  if (g.kind === 'p2' && f.length === 2) {
+  if (f.length === 2 && (g.kind === 'p2' || g.decided === 'pinch' || g.decided === 'scroll2' || g.decided === 'pan2')) {
     const d = d2(f[0], f[1]), m = mid(f[0], f[1]);
     const total = Math.hypot(m.x - g.mid0.x, m.y - g.mid0.y);
     g.moved = Math.max(g.moved, total, Math.abs(d - g.d0));
 
     if (!g.decided) {
-      if (Math.abs(d - g.d0) > 8) { g.decided = 'pinch'; }
-      else if (total > 10) { g.decided = 'scroll2'; }
+      if (Math.abs(d - g.d0) > 8) g.decided = 'pinch';
+      else if (total > 10) g.decided = z > 1.15 ? 'pan2' : 'scroll2';
       else return;
     }
     if (g.decided === 'pinch' && g.b) {
@@ -461,68 +564,89 @@ touchEl.addEventListener('touchmove', (e) => {
       px = m.x - g.b.left - g.a.x * z;
       py = m.y - g.b.top - g.a.y * z;
       applyView();
+    } else if (g.decided === 'pan2') {
+      px += m.x - g.lx; py += m.y - g.ly;
+      applyView();
     } else if (g.decided === 'scroll2') {
-      const dy = m.y - (g.my !== undefined ? g.my : m.y);
-      const dx = m.x - (g.mx !== undefined ? g.mx : m.x);
-      g.mx = m.x; g.my = m.y;
+      const dy = m.y - g.ly, dx = m.x - g.lx;
+      g.vy0 = dy; g.vx0 = dx; g.vt = now;
       if (dy) wheelAt(0, -dy * 1.3, m.x, m.y);
       if (dx) wheelAt(-dx * 1.3, 0, m.x, m.y);
     }
+    g.lx = m.x; g.ly = m.y;
     return;
+  }
+
+  if (f.length >= 3 && g.kind === 'p3') {
+    g.moved = Math.max(g.moved, Math.hypot(f[0].x - f[0].x0, f[0].y - f[0].y0));
   }
 }, { passive: false });
 
 function endTouch(e) {
   e.preventDefault(); e.stopPropagation();
+  const changed = Object.values(e.changedTouches);
   for (const t of e.changedTouches) delete S[t.identifier];
   const f = fingers();
   const now = performance.now();
-  clearTimeout(longTimer);
+  clearTimeout(armTimer);
 
-  if (g && g.kind === 'p1' && f.length === 0) {
-    const s = Object.values(e.changedTouches)[0];
-    const tx = mode === 'trackpad' ? vx : (s ? s.clientX : 0);
-    const ty = mode === 'trackpad' ? vy : (s ? s.clientY : 0);
+  if (g && (g.kind === 'p1' || g.kind === 'move1' || g.kind === 'scroll1' || g.dragging) && f.length === 0) {
+    const s = changed[0] || { clientX: vx, clientY: vy };
+    const tx = activeMode() === 'trackpad' ? vx : s.clientX;
+    const ty = activeMode() === 'trackpad' ? vy : s.clientY;
     if (g.dragging) {
       mouse('mouseup', tx, ty, 0);
-    } else if (!g.decided && g.moved < 12) {
-      if (armedDrag) {
-        // Appui maintenu relâché sans déplacement → clic droit.
+    } else if (!g.decided && g.moved < 25) {
+      if (armedDrag) { rightAt(tx, ty); buzz(10); }
+      else { clickAt(tx, ty); buzz(6); }
+    } else if (g.kind === 'scroll1' && now - g.vt < 90) {
+      // Inertie : quelques crans de molette supplémentaires.
+      let vy0 = g.vy0 * 1.15, vx0 = g.vx0 * 1.15, k = 0;
+      const glide = () => {
+        if (k++ > 5) return;
+        vy0 *= 0.72; vx0 *= 0.72;
+        if (Math.abs(vy0) < 1 && Math.abs(vx0) < 1) return;
+        wheelAt(-vx0, -vy0, tx, ty);
+        requestAnimationFrame(glide);
+      };
+      glide();
+    }
+  }
+
+  if (g && g.kind === 'p2' && f.length === 0) {
+    if ((!g.decided || g.moved < 12) && now - g.mid0.t0 < 400) {
+      // Tap à deux doigts : clic droit ; deux taps rapides → zoom 1×.
+      if (now - lastTwoTap < 320) { resetView(); pill('Zoom 1×'); lastTwoTap = 0; }
+      else {
+        const tx = activeMode() === 'trackpad' ? vx : g.mid0.x;
+        const ty = activeMode() === 'trackpad' ? vy : g.mid0.y;
         rightAt(tx, ty);
-        buzz(10);
-      } else {
-        clickAt(tx, ty);
-        lastTapT = now;
+        buzz(8);
+        lastTwoTap = now;
       }
     }
   }
 
-  if (g && g.kind === 'p2' && f.length === 0 && (!g.decided || g.moved < 12)) {
-    const m = g.mid0;
-    const tx = mode === 'trackpad' ? vx : m.x;
-    const ty = mode === 'trackpad' ? vy : m.y;
-    rightAt(tx, ty);
-    buzz(8);
-  }
-
-  if (g && (g.kind === 'move1' || g.kind === 'scroll1') && f.length === 0) {
-    // rien de plus
+  if (g && g.kind === 'p3' && f.length === 0 && g.moved < 12) {
+    // Trois doigts : bascule manuelle du clavier.
+    kbManual = !kbOpen;
+    if (kbManual) { setKeyboard(true); pill('Clavier'); }
+    else { setKeyboard(false); pill('Clavier masqué'); kbManual = false; }
   }
 
   if (f.length === 0) { g = null; armedDrag = false; }
-  else if (f.length === 1 && g && (g.kind === 'p2' || g.kind === 'multi')) {
+  else if (f.length === 1 && g && (g.kind === 'p2' || g.kind === 'multi' || g.kind === 'p3')) {
     const s = f[0];
-    g = { kind: 'p1', moved: 0, t0: now };
+    g = { kind: 'p1', moved: 0, lx: s.x, ly: s.y, vx0: 0, vy0: 0, vt: now };
   }
 }
 touchEl.addEventListener('touchend', endTouch, { passive: false });
 touchEl.addEventListener('touchcancel', endTouch, { passive: false });
 
-// Aucun menu contextuel, aucune sélection.
 addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ---------------------------------------------------------------------------
-// Bouton flottant plein écran (déplaçable + bascule)
+// Bouton flottant plein écran (26 px, déplaçable)
 // ---------------------------------------------------------------------------
 const fsBtn = $('#fs'), fsIcon = $('#fsicon');
 const ICON_FS = 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5';
@@ -532,8 +656,7 @@ const ICON_RESTORE = 'M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5';
   try {
     const p = JSON.parse(localStorage.getItem('aios.fspos') || 'null');
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
-      fsBtn.style.left = p.x + 'px'; fsBtn.style.top = p.y + 'px';
-      fsBtn.style.right = 'auto';
+      fsBtn.style.left = p.x + 'px'; fsBtn.style.top = p.y + 'px'; fsBtn.style.right = 'auto';
     }
   } catch (e) {}
 })();
@@ -542,7 +665,8 @@ let fsDrag = null;
 fsBtn.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   fsBtn.setPointerCapture(e.pointerId);
-  fsDrag = { x0: e.clientX, y0: e.clientY, x: fsBtn.getBoundingClientRect().left, y: fsBtn.getBoundingClientRect().top, moved: false };
+  const r = fsBtn.getBoundingClientRect();
+  fsDrag = { x0: e.clientX, y0: e.clientY, x: r.left, y: r.top, moved: false };
   fsBtn.classList.add('hot');
 }, { passive: false });
 fsBtn.addEventListener('pointermove', (e) => {
@@ -550,21 +674,19 @@ fsBtn.addEventListener('pointermove', (e) => {
   const dx = e.clientX - fsDrag.x0, dy = e.clientY - fsDrag.y0;
   if (!fsDrag.moved && Math.hypot(dx, dy) < 8) return;
   fsDrag.moved = true;
-  const nx = Math.max(4, Math.min(innerWidth - 56, fsDrag.x + dx));
-  const ny = Math.max(4, Math.min(innerHeight - 56, fsDrag.y + dy));
-  fsBtn.style.left = nx + 'px'; fsBtn.style.top = ny + 'px'; fsBtn.style.right = 'auto';
+  fsBtn.style.left = Math.max(4, Math.min(innerWidth - 30, fsDrag.x + dx)) + 'px';
+  fsBtn.style.top = Math.max(4, Math.min(innerHeight - 30, fsDrag.y + dy)) + 'px';
+  fsBtn.style.right = 'auto';
 }, { passive: false });
-fsBtn.addEventListener('pointerup', (e) => {
+fsBtn.addEventListener('pointerup', () => {
   if (!fsDrag) return;
-  const wasMoved = fsDrag.moved;
+  const moved = fsDrag.moved;
   fsDrag = null;
   fsBtn.classList.remove('hot');
-  if (wasMoved) {
-    const p = { x: fsBtn.getBoundingClientRect().left, y: fsBtn.getBoundingClientRect().top };
-    localStorage.setItem('aios.fspos', JSON.stringify(p));
-  } else {
-    toggleFs();
-  }
+  if (moved) {
+    const r = fsBtn.getBoundingClientRect();
+    localStorage.setItem('aios.fspos', JSON.stringify({ x: r.left, y: r.top }));
+  } else toggleFs();
 });
 
 async function toggleFs() {
@@ -580,51 +702,27 @@ async function toggleFs() {
 }
 document.addEventListener('fullscreenchange', () => {
   fsIcon.querySelector('path').setAttribute('d', document.fullscreenElement ? ICON_RESTORE : ICON_FS);
+  setTimeout(() => adaptScreen(false), 300);
   wake();
 });
 
 // ---------------------------------------------------------------------------
-// Barre d'outils
+// Barre clavier (contextuelle) : touches, modificateurs collants, outils
 // ---------------------------------------------------------------------------
-function refreshMode() {
-  $('#lmode').textContent = mode === 'trackpad' ? 'Pavé' : 'Touch';
-  $('#bmode').classList.toggle('on', mode === 'trackpad');
-}
-$('#bmode').addEventListener('click', () => {
-  mode = mode === 'trackpad' ? 'direct' : 'trackpad';
-  localStorage.setItem('aios.mode', mode);
-  initVC();
-  refreshMode();
-  pill(mode === 'trackpad' ? 'Mode pavé' : 'Mode tactile');
-});
-refreshMode();
-
-$('#bzoom').addEventListener('click', () => { resetView(); pill('Zoom 1×'); });
-
-$('#bkey').addEventListener('click', () => {
-  const ime = $('#ime');
-  ime.focus();
-  $('#kbar').classList.add('show');
-});
-
-// Masquer la barre clavier quand le clavier système se ferme (perte de focus).
-$('#ime').addEventListener('blur', () => setTimeout(() => {
-  if (document.activeElement !== $('#ime')) $('#kbar').classList.remove('show');
-}, 120));
-$('#ime').addEventListener('focus', () => $('#kbar').classList.add('show'));
-
-// Saisie texte via le clavier Android (IME) → touches VNC.
 $('#ime').addEventListener('keydown', (e) => e.stopPropagation());
+$('#ime').addEventListener('focus', () => { kbOpen = true; $('#kbar').classList.add('show'); });
+$('#ime').addEventListener('blur', () => {
+  setTimeout(() => {
+    if (document.activeElement !== $('#ime')) { kbOpen = false; $('#kbar').classList.remove('show'); kbManual = false; }
+  }, 120);
+});
 $('#ime').addEventListener('input', () => {
   const ime = $('#ime');
   for (const ch of ime.value) {
     const cp = ch.codePointAt(0);
     if (cp === 10) { tapKey(...KEYS.Enter); continue; }
     if (cp < 32) continue;
-    if (rfb && connected) {
-      rfb.sendKey(cp, '', true);
-      rfb.sendKey(cp, '', false);
-    }
+    if (rfb && connected) { rfb.sendKey(cp, '', true); rfb.sendKey(cp, '', false); }
   }
   ime.value = '';
 });
@@ -632,15 +730,23 @@ $('#ime').addEventListener('input', () => {
 function tapKey(keysym, code) {
   if (!rfb || !connected) return;
   rfb.sendKey(keysym, code, true);
-  setTimeout(() => rfb.sendKey(keysym, code, false), 30);
+  setTimeout(() => rfb && rfb.sendKey(keysym, code, false), 30);
 }
 
-// Barre d'accessoires : touches spéciales + modificateurs collants.
 $('#kbar').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-k]');
   if (!b) return;
   buzz(8);
   const k = b.dataset.k;
+  if (k === 'hide') { kbManual = false; setKeyboard(false); return; }
+  if (k === 'mode') {
+    modePref = modePref === 'auto' ? 'trackpad' : (modePref === 'trackpad' ? 'direct' : 'auto');
+    localStorage.setItem('aios.mode', modePref);
+    pill(modePref === 'auto' ? 'Mode auto' : (modePref === 'trackpad' ? 'Mode pavé' : 'Mode tactile'));
+    return;
+  }
+  if (k === 'clip') { $('#cliptext').value = remoteClip || ''; $('#clip').classList.add('show'); return; }
+  if (k === 'zoom') { resetView(); pill('Zoom 1×'); return; }
   if (k === 'CAD') {
     rfb && rfb.sendKey(0xFFE3, 'ControlLeft', true);
     rfb && rfb.sendKey(0xFFE9, 'AltLeft', true);
@@ -665,10 +771,6 @@ $('#kbar').addEventListener('click', (e) => {
 // ---------------------------------------------------------------------------
 // Presse-papiers
 // ---------------------------------------------------------------------------
-$('#bclip').addEventListener('click', () => {
-  $('#cliptext').value = remoteClip || '';
-  $('#clip').classList.add('show');
-});
 $('#clipclose').addEventListener('click', () => $('#clip').classList.remove('show'));
 $('#clipin').addEventListener('click', () => {
   const v = $('#cliptext').value;
@@ -684,7 +786,33 @@ $('#clipout').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tutoriel (première visite)
+// Verrouillage à la reprise (empreinte si disponible)
+// ---------------------------------------------------------------------------
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > 8 * 60 * 1000) {
+    $('#lock').classList.add('show');
+  }
+});
+$('#lockbtn').addEventListener('click', async () => {
+  try {
+    if (window.PublicKeyCredential) {
+      const cred = await navigator.credentials.get({
+        publicKey: {
+          challenge: new Uint8Array(16),
+          userVerification: 'required',
+          timeout: 20000,
+        },
+      });
+      if (cred) { $('#lock').classList.remove('show'); return; }
+    }
+  } catch (e) {}
+  $('#lock').classList.remove('show');
+});
+
+// ---------------------------------------------------------------------------
+// Tutoriel
 // ---------------------------------------------------------------------------
 if (!localStorage.getItem('aios.tuto')) $('#tuto').classList.add('show');
 $('#tutook').addEventListener('click', () => {
@@ -696,6 +824,7 @@ $('#tutook').addEventListener('click', () => {
 // Démarrage
 // ---------------------------------------------------------------------------
 connect();
+pollFocus();
 </script>
 </body>
 </html>

@@ -35,6 +35,47 @@ async function signDesktopGrant(secret) {
   return `${exp}.${hex}`;
 }
 
+/** Vérifie un jeton de bureau <exp>.<hmac> (même signature que /grant). */
+async function verifyDesktopGrant(secret, value) {
+  if (!secret || typeof value !== "string" || !value) return false;
+  if (value === secret) return true; // jeton brut (usage machine)
+  const m = value.match(/^(\d{10})\.([a-f0-9]{64})$/);
+  if (!m) return false;
+  const exp = Number(m[1]);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(exp)));
+  const hex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return timingSafeEqualStr(hex, m[2]);
+}
+
+/** Exécute une commande dans l'invité via le pont (relais /api/linux/exec). */
+async function linuxExec(env, command, timeoutSec = 60) {
+  const init = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + env.VM_API_TOKEN },
+    body: JSON.stringify({ command, timeout_sec: timeoutSec }),
+    redirect: "follow",
+  };
+  const r = env.DESK
+    ? await env.DESK.fetch("https://ai-os-desk.hugdu77777.workers.dev/api/linux/exec", init)
+    : await fetch("https://ai-os-desk.hugdu77777.workers.dev/api/linux/exec", init);
+  return r.json();
+}
+
+/** Détecteur de focus texte (AT-SPI) + démon de veille dans l'invité. */
+const FOCUS_PY_B64 = "aW1wb3J0IHN5cwpURVhUX1JPTEVTID0geyd0ZXh0JywgJ2VudHJ5JywgJ3Bhc3N3b3JkIHRleHQnLCAncGFyYWdyYXBoJywgJ3Rlcm1pbmFsJywgJ2RvY3VtZW50IHRleHQnLCAnc3BpbiBidXR0b24nfQpmb3VuZCA9ICdub25lJwp0cnk6CiAgICBpbXBvcnQgcHlhdHNwaQogICAgZGVmIHdhbGsobywgZGVwdGgpOgogICAgICAgIGdsb2JhbCBmb3VuZAogICAgICAgIGlmIGZvdW5kICE9ICdub25lJyBvciBkZXB0aCA+IDc6CiAgICAgICAgICAgIHJldHVybgogICAgICAgIHRyeToKICAgICAgICAgICAgaWYgby5nZXRTdGF0ZSgpLmNvbnRhaW5zKHB5YXRzcGkuU1RBVEVfRk9DVVNFRCk6CiAgICAgICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICAgICAgcm9sZSA9IHN0cihvLmdldFJvbGVOYW1lKCkpCiAgICAgICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgICAgIHJvbGUgPSAnJwogICAgICAgICAgICAgICAgZm91bmQgPSAndGV4dCcgaWYgcm9sZSBpbiBURVhUX1JPTEVTIGVsc2UgJ290aGVyJwogICAgICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgcGFzcwogICAgICAgIHRyeToKICAgICAgICAgICAgZm9yIGMgaW4gbzoKICAgICAgICAgICAgICAgIHdhbGsoYywgZGVwdGggKyAxKQogICAgICAgICAgICAgICAgaWYgZm91bmQgIT0gJ25vbmUnOgogICAgICAgICAgICAgICAgICAgIHJldHVybgogICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgIHBhc3MKICAgIHRyeToKICAgICAgICBkZXNrdG9wID0gcHlhdHNwaS5SZWdpc3RyeS5nZXREZXNrdG9wKDApCiAgICAgICAgZm9yIGFwcCBpbiBkZXNrdG9wOgogICAgICAgICAgICB3YWxrKGFwcCwgMCkKICAgICAgICAgICAgaWYgZm91bmQgIT0gJ25vbmUnOgogICAgICAgICAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgcGFzcwpleGNlcHQgRXhjZXB0aW9uOgogICAgcGFzcwppZiBmb3VuZCA9PSAnbm9uZSc6CiAgICB0cnk6CiAgICAgICAgaW1wb3J0IHN1YnByb2Nlc3MKICAgICAgICB3ID0gc3VicHJvY2Vzcy5jaGVja19vdXRwdXQoWyd4ZG90b29sJywgJ2dldGFjdGl2ZXdpbmRvdycsICdnZXR3aW5kb3djbGFzc25hbWUnXSwgdGltZW91dD0yKS5kZWNvZGUoKS5zdHJpcCgpLmxvd2VyKCkKICAgICAgICBpZiBhbnkoayBpbiB3IGZvciBrIGluICgndGVybWluYWwnLCAneHRlcm0nLCAndXJ4dnQnLCAna2l0dHknLCAnYWxhY3JpdHR5JywgJ2tvbnNvbGUnLCAndGlsaXgnLCAnZ3Vha2UnLCAnc2FrdXJhJykpOgogICAgICAgICAgICBmb3VuZCA9ICd0ZXh0JwogICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICBwYXNzCnByaW50KGZvdW5kKQo=";
+const FOCUS_ENSURE = [
+  "if [ ! -f /home/aios/focus-poll.py ]; then printf %s '" + FOCUS_PY_B64 + "' | base64 -d > /home/aios/focus-poll.py; fi",
+  'python3 -c "import pyatspi" 2>/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-pyatspi >/dev/null 2>&1',
+  'if ! kill -0 "$(cat /tmp/aios-focus.pid 2>/dev/null)" 2>/dev/null; then',
+  "  setsid nohup bash -c 'while :; do DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus python3 /home/aios/focus-poll.py > /tmp/aios-focus.new 2>/dev/null && mv /tmp/aios-focus.new /tmp/aios-focus || echo none > /tmp/aios-focus; sleep 0.7; done' >/dev/null 2>&1 &",
+  "  echo $! > /tmp/aios-focus.pid",
+  "fi",
+].join("\n");
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -100,6 +141,62 @@ export default {
         }
       } catch (e) {}
       return new Response("Application indisponible.", { status: 502, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+
+    // 4. Bureau mobile : géométrie, focus texte, redimensionnement.
+    //    Autorisé par le jeton de bureau signé (?s=) — jamais de secret en clair.
+    if (url.pathname.startsWith("/api/desktop/")) {
+      const ticket = url.searchParams.get("s") || url.searchParams.get("tok") || "";
+      const bearer = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      const okTicket = await verifyDesktopGrant(env.VM_API_TOKEN, ticket);
+      const okPass = !!env.PASS && !!bearer && timingSafeEqualStr(bearer, env.PASS);
+      if (!okTicket && !okPass) {
+        return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      const J = (o, s = 200) => new Response(JSON.stringify(o), {
+        status: s,
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8", "X-Linux-Daemon": "1" },
+      });
+
+      if (url.pathname === "/api/desktop/geom" && request.method === "GET") {
+        const r = await linuxExec(env, 'export DISPLAY=:99\nxrandr 2>/dev/null | grep -o "current [0-9]* x [0-9]*" || true', 20);
+        const m = String((r && r.stdout) || "").match(/current (\d+) x (\d+)/);
+        return J({ ok: !!m, width: m ? Number(m[1]) : null, height: m ? Number(m[2]) : null });
+      }
+
+      if (url.pathname === "/api/desktop/focus" && request.method === "GET") {
+        const r = await linuxExec(env, FOCUS_ENSURE + "\ncat /tmp/aios-focus 2>/dev/null || echo none", 30);
+        const v = String((r && r.stdout) || "").trim().split("\n").pop();
+        return J({ ok: true, focus: v === "text" ? "text" : (v === "other" ? "other" : "none") });
+      }
+
+      if (url.pathname === "/api/desktop/resize" && request.method === "POST") {
+        let body = {};
+        try { body = JSON.parse(await request.text()); } catch (e) {}
+        const w = Math.round(Number(body.width)), h = Math.round(Number(body.height));
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w < 480 || w > 3840 || h < 320 || h > 2400) {
+          return J({ ok: false, error: "Géométrie invalide" }, 400);
+        }
+        const script = FOCUS_ENSURE + "\n" + [
+          "pkill -x xfce4-session 2>/dev/null; pkill -x xfwm4 2>/dev/null; pkill -x xfdesktop 2>/dev/null; pkill -x xfce4-panel 2>/dev/null; pkill -x xfsettingsd 2>/dev/null",
+          "pkill -x x11vnc 2>/dev/null; pkill -x websockify 2>/dev/null; pkill -x Xvfb 2>/dev/null",
+          "sleep 1",
+          `setsid nohup Xvfb :99 -screen 0 ${w}x${h}x24 >/tmp/aios-xvfb.log 2>&1 &`,
+          "sleep 1.6",
+          "setsid nohup env DISPLAY=:99 xfce4-session >/tmp/aios-xfce.log 2>&1 &",
+          "sleep 1",
+          "setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &",
+          "setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 &",
+          "sleep 1.5",
+          'xrandr 2>/dev/null | grep -o "current [0-9]* x [0-9]*" || true',
+        ].join("\n");
+        const r = await linuxExec(env, script, 60);
+        return J({ ok: !!(r && r.ok), width: w, height: h, out: String((r && r.stdout) || "").slice(-300) });
+      }
+
+      return J({ ok: false, error: "Route inconnue : " + url.pathname }, 404);
     }
 
     // 4. Extraction & Validation de l'Authentification
