@@ -161,11 +161,16 @@ aios_guest_ensure_desktop() {
       || aios_warn "Chrome non installé dans l'invité."
   fi
 
-  # 4. Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
+  # 4. Chrome : accessibilité forcée (sinon Chrome n'expose AUCUN champ texte
+  #    à AT-SPI et la détection du clavier est aveugle).
+  aios_guest_ssh "$1" 20 'grep -q force-renderer-accessibility /usr/share/applications/google-chrome.desktop || sudo sed -i "s#^Exec=/usr/bin/google-chrome-stable#Exec=env ACCESSIBILITY_ENABLED=1 /usr/bin/google-chrome-stable --force-renderer-accessibility#" /usr/share/applications/google-chrome.desktop' \
+    || aios_warn "Chrome non configuré pour l'accessibilité."
+
+  # 5. Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
   aios_guest_ssh "$1" 20 'command -v google-chrome-stable >/dev/null 2>&1 && { d=$(xdg-user-dir DESKTOP 2>/dev/null || echo /home/aios/Desktop); mkdir -p "$d"; cp /usr/share/applications/google-chrome.desktop "$d/" && chmod +x "$d/google-chrome.desktop"; }' \
     || aios_warn "Raccourci bureau Chrome non posé."
 
-  # 5. Fond d'écran blanc, écrit comme fichier de canal xfconf (la session n'est
+  # 6. Fond d'écran blanc, écrit comme fichier de canal xfconf (la session n'est
   #    pas encore lancée : pas de D-Bus). Xvfb nomme la sortie « screen » →
   #    la propriété est monitorscreen. Idempotent : on n'écrase pas un fichier
   #    déjà présent.
@@ -207,7 +212,7 @@ aios_guest_start_desktop() {
   local d="$AIOS_GUEST_DISPLAY" r="$AIOS_GUEST_RESOLUTION"
   aios_guest_ssh "$1" 30 "command -v Xvfb >/dev/null || exit 0; pgrep -x Xvfb >/dev/null && exit 0; setsid nohup Xvfb $d -screen 0 $r >/tmp/aios-xvfb.log 2>&1 </dev/null & exit 0" \
     || aios_warn "Xvfb non démarré."
-  aios_guest_ssh "$1" 30 "command -v xfce4-session >/dev/null || exit 0; pgrep -x xfce4-session >/dev/null && exit 0; setsid nohup env DISPLAY=$d xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null & exit 0" \
+  aios_guest_ssh "$1" 30 "command -v xfce4-session >/dev/null || exit 0; pgrep -x xfce4-session >/dev/null && exit 0; setsid nohup env DISPLAY=$d ACCESSIBILITY_ENABLED=1 QT_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge xfce4-session >/tmp/aios-xfce.log 2>&1 </dev/null & exit 0" \
     || aios_warn "XFCE non démarré."
 }
 

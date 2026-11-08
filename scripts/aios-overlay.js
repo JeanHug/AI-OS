@@ -1,19 +1,17 @@
 /**
  * aios-overlay.js — surcouche AI OS posée sur l'interface noVNC classique.
  *
- * Ajoute, SANS rien modifier de noVNC (ni ses clics, ni son panneau de
- * paramètres) :
+ * Ajoute, SANS rien modifier de noVNC (ni ses clics, ni son panneau) :
  *   - le petit bouton flottant plein écran (noir, glyphe blanc, déplaçable) ;
- *   - le clavier automatique : le clavier du téléphone s'ouvre dès qu'un champ
- *     texte est actif dans la VM (détection AT-SPI) et se ferme tout seul ;
- *   - l'adaptation automatique du bureau au format de l'appareil (comparaison
- *     de largeur, uniquement sur un VRAI changement de format) ;
- *   - l'écran qui ne s'éteint pas, un témoin de latence discret, une aide
- *     brève au premier lancement.
+ *   - le clavier automatique : il s'ouvre dès qu'un champ texte est actif dans
+ *     la VM (AT-SPI) et se ferme tout seul (ouverture liée au geste utilisateur,
+ *     seule forme autorisée par les navigateurs) ;
+ *   - l'adaptation du bureau à la zone VISIBLE de l'appareil (largeur), jamais
+ *     perturbée par l'ouverture du clavier ;
+ *   - l'écran qui ne s'éteint pas, une aide brève au premier lancement.
  *
- * Le jeton de bureau (?s=) est lu dans l'URL de la page, ou dans le référent
- * (le passage par /?s= le porte). Sans jeton, la surcouche se limite au bouton
- * plein écran.
+ * Le jeton de bureau est lu dans l'URL de la page, ou à défaut dans le
+ * localStorage / cookie lisible / nom de fenêtre (posés par mobile.html).
  */
 (function () {
   'use strict';
@@ -21,8 +19,7 @@
   var API = 'https://ai-os.hugdu77777.workers.dev';
 
   // -------------------------------------------------------------------------
-  // Jeton de bureau : ?s= de la page, sinon celui conservé par mobile.html
-  // (localStorage). Sans jeton, la surcouche se limite au bouton plein écran.
+  // Jeton de bureau
   // -------------------------------------------------------------------------
   function getSig() {
     try {
@@ -42,7 +39,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // Styles
+  // Styles (le bouton, lui, porte ses styles EN LIGNE : incontestables)
   // -------------------------------------------------------------------------
   var css = [
     '#aios-pill{position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:2000;',
@@ -50,14 +47,6 @@
     'font-size:12.5px;font-family:system-ui,sans-serif;color:#eee;opacity:0;transition:opacity .35s;',
     'pointer-events:none;white-space:nowrap}',
     '#aios-pill.aios-show{opacity:1}',
-    '#aios-lat{position:fixed;top:calc(14px + env(safe-area-inset-top));left:12px;z-index:2000;width:8px;height:8px;',
-    'border-radius:50%;background:#2c7a3f;box-shadow:0 0 6px rgba(0,0,0,.6);pointer-events:none;opacity:.85}',
-    '#aios-fs{position:fixed;z-index:2100;width:26px;height:26px;border-radius:50%;background:#000;',
-    'border:1.5px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.55);display:grid;place-items:center;',
-    'padding:0;cursor:pointer;opacity:.65;transition:opacity .25s;right:calc(10px + env(safe-area-inset-right));top:38%}',
-    '#aios-fs::before{content:"";position:absolute;inset:-11px}',
-    '#aios-fs.aios-hot{opacity:1}',
-    '#aios-fs svg{width:15px;height:15px;display:block;pointer-events:none}',
     '#aios-kbar{position:fixed;left:0;right:0;z-index:2050;bottom:0;display:none;gap:5px;overflow-x:auto;',
     'padding:7px calc(8px + env(safe-area-inset-left)) calc(7px + env(safe-area-inset-bottom));',
     'background:rgba(12,12,12,.97);border-top:1px solid rgba(255,255,255,.14);-webkit-overflow-scrolling:touch}',
@@ -65,7 +54,7 @@
     '#aios-kbar button{flex:0 0 auto;min-width:40px;height:38px;border-radius:9px;background:#232323;color:#eee;',
     'border:1px solid rgba(255,255,255,.14);font-size:13px;padding:0 10px;font-family:system-ui,sans-serif}',
     '#aios-kbar button.aios-on{background:#3b6fd4;border-color:#6a95e8}',
-    '#aios-ime{position:fixed;left:0;right:0;bottom:0;z-index:2040;height:1px;width:100%;opacity:.01;border:0;',
+    '#aios-ime{position:fixed;left:0;right:0;bottom:0;z-index:2040;height:2px;width:100%;opacity:.01;border:0;',
     'outline:0;background:transparent;color:transparent;font-size:16px}',
     '#aios-tuto{position:fixed;inset:0;z-index:2200;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px}',
     '#aios-tuto.aios-show{display:grid}',
@@ -80,9 +69,6 @@
   style.textContent = css;
   document.head.appendChild(style);
 
-  // -------------------------------------------------------------------------
-  // Éléments
-  // -------------------------------------------------------------------------
   function el(html) {
     var d = document.createElement('div');
     d.innerHTML = html.trim();
@@ -90,10 +76,13 @@
   }
 
   var pill = el('<div id="aios-pill"></div>');
-  var lat = el('<div id="aios-lat"></div>');
   var fsBtn = el(
-    '<button id="aios-fs" aria-label="Plein écran">' +
-    '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">' +
+    '<button id="aios-fs" aria-label="Plein écran" style="position:fixed;z-index:2100;' +
+    'width:26px;height:26px;min-width:26px;max-width:26px;padding:0;margin:0;border-radius:50%;' +
+    'background:#000;border:1.5px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
+    'display:block;overflow:hidden;box-sizing:border-box;cursor:pointer;opacity:.65;' +
+    'right:10px;top:38%;line-height:0">' +
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" style="display:block">' +
     '<path id="aios-fsicon" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>'
   );
   var kbar = el(
@@ -112,11 +101,10 @@
     '<div id="aios-tuto"><div class="card"><h2>Piloter le bureau au doigt</h2><ul>' +
     '<li>Tapez pour cliquer, glissez pour déplacer — noVNC gère les clics nativement.</li>' +
     '<li>Le clavier du téléphone s’ouvre tout seul dès qu’un champ texte est actif (trois doigts pour forcer).</li>' +
-    '<li>Le bureau s’adapte au format de votre appareil ; le petit bouton rond passe en plein écran.</li>' +
+    '<li>Le bureau épouse la largeur de votre écran ; le petit bouton rond passe en plein écran.</li>' +
     '</ul><button id="aios-tutook">Compris</button></div></div>'
   );
   document.body.appendChild(pill);
-  document.body.appendChild(lat);
   document.body.appendChild(fsBtn);
   document.body.appendChild(kbar);
   document.body.appendChild(ime);
@@ -156,7 +144,10 @@
   function openKb() {
     if (kbOpen) return;
     kbOpen = true;
-    ime.focus();
+    try {
+      ime.focus({ preventScroll: true });
+      ime.setSelectionRange(0, 0);
+    } catch (e) { try { ime.focus(); } catch (e2) {} }
     kbar.classList.add('aios-show');
   }
   function closeKb() {
@@ -208,28 +199,22 @@
   });
 
   // -------------------------------------------------------------------------
-  // Détection du focus texte (AT-SPI, via le Worker) + ouverture au geste
+  // Détection du focus texte (AT-SPI via le Worker) + ouverture au geste
   // -------------------------------------------------------------------------
   function pollFocus() {
     if (!sig || document.hidden) return;
-    var t0 = performance.now();
     fetch(apiUrl('/api/desktop/focus'), { method: 'GET' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        var rtt = performance.now() - t0;
-        lat.style.background = rtt < 250 ? '#2c7a3f' : (rtt < 700 ? '#b08a22' : '#a33');
         lastFocus = (d && d.focus) || 'none';
         if (lastFocus !== 'text' && kbOpen && !kbManual) closeKb();
         if (lastFocus === 'text' && !kbOpen && !kbManual && navigator.userActivation && navigator.userActivation.isActive) {
           openKb();
         }
       })
-      .catch(function () { lat.style.background = '#a33'; });
+      .catch(function () {});
   }
 
-  // L'ouverture du clavier logiciel exige un geste de l'utilisateur : on ouvre
-  // donc au moindre contact quand un champ texte est actif — automatique au
-  // toucher suivant, invisible pour l'utilisateur.
   function onGestureStart(e) {
     if (e.touches && e.touches.length >= 3) {
       e.preventDefault();
@@ -240,9 +225,8 @@
     }
     wake();
     if (lastFocus === 'text' && !kbOpen) openKb();
-    // Le focus vient de changer avec ce geste : on revérifie aussitôt (puis
-    // 350 ms après) pour ouvrir le clavier dans la foulée si un champ texte
-    // est actif — l'ouverture reste liée à une activation utilisateur.
+    // Le geste vient de changer le focus dans la VM : on revérifie aussitôt
+    // (puis dans la foulée) pour ouvrir le clavier si un champ texte est actif.
     pollFocus();
     setTimeout(pollFocus, 350);
     setTimeout(pollFocus, 1200);
@@ -251,18 +235,18 @@
   window.addEventListener('pointerdown', function () {
     wake();
     if (lastFocus === 'text' && !kbOpen) openKb();
+    pollFocus();
   }, true);
   setInterval(pollFocus, 1300);
 
   // -------------------------------------------------------------------------
-  // Adaptation de l'écran à l'appareil (vraie géométrie de l'écran UNIQUEMENT :
-  // l'ouverture du clavier ne doit JAMAIS déclencher de redimensionnement)
+  // Adaptation à la zone VISIBLE (largeur) — l'ouverture du clavier ne change
+  // que la hauteur : elle ne déclenche donc JAMAIS de redimensionnement.
   // -------------------------------------------------------------------------
+  var lastW = 0;
   function targetGeom() {
-    var sw = screen.width || window.innerWidth;
-    var sh = screen.height || window.innerHeight;
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w = Math.round(sw * dpr), h = Math.round(sh * dpr);
+    var w = Math.round((window.innerWidth || 390) * Math.min(window.devicePixelRatio || 1, 2));
+    var h = Math.round((window.innerHeight || 844) * Math.min(window.devicePixelRatio || 1, 2));
     var long = Math.max(w, h);
     if (long > 2560) { var k = 2560 / long; w = Math.round(w * k); h = Math.round(h * k); }
     w = Math.max(480, w - (w % 2)); h = Math.max(320, h - (h % 2));
@@ -271,14 +255,15 @@
 
   var resizeAttempts = 0;
   function adaptScreen() {
+    lastW = window.innerWidth;
     if (!sig || resizeAttempts >= 2) return;
     fetch(apiUrl('/api/desktop/geom'), { method: 'GET' })
       .then(function (r) { return r.json(); })
       .then(function (g) {
         if (!g || !g.ok) return;
         var t = targetGeom();
-        var ratioBad = Math.abs((g.width / g.height) - (t.w / t.h)) > 0.06;
-        var widthBad = Math.abs(g.width - t.w) > Math.max(60, t.w * 0.12);
+        var ratioBad = Math.abs((g.width / g.height) - (t.w / t.h)) > 0.04;
+        var widthBad = Math.abs(g.width - t.w) > Math.max(60, t.w * 0.10);
         if (!ratioBad && !widthBad) { resizeAttempts = 0; return; }
         resizeAttempts++;
         say('Adaptation de l’écran à votre appareil…', 6000);
@@ -290,11 +275,22 @@
       })
       .catch(function () {});
   }
-  window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 400); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { pollFocus(); setTimeout(adaptScreen, 400); } });
+  window.addEventListener('resize', function () {
+    // Un changement de LARGEUR = rotation ou nouvel affichage → on adapte.
+    // Un changement de hauteur seul = clavier → on n'y touche pas.
+    if (window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
+  });
+  window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 450); });
+  document.addEventListener('fullscreenchange', function () {
+    setTimeout(adaptScreen, 350);
+    wake();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { pollFocus(); setTimeout(adaptScreen, 400); }
+  });
 
   // -------------------------------------------------------------------------
-  // Bouton plein écran flottant (déplaçable, position mémorisée)
+  // Bouton plein écran flottant (26 px, styles en ligne, déplaçable)
   // -------------------------------------------------------------------------
   var ICON_FS = 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5';
   var ICON_RESTORE = 'M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5';
@@ -310,10 +306,10 @@
   var fsDrag = null;
   fsBtn.addEventListener('pointerdown', function (e) {
     e.preventDefault();
-    fsBtn.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    try { fsBtn.setPointerCapture(e.pointerId); } catch (err) {}
     var r = fsBtn.getBoundingClientRect();
     fsDrag = { x0: e.clientX, y0: e.clientY, x: r.left, y: r.top, moved: false };
-    fsBtn.classList.add('aios-hot');
   });
   fsBtn.addEventListener('pointermove', function (e) {
     if (!fsDrag) return;
@@ -323,12 +319,13 @@
     fsBtn.style.left = Math.max(4, Math.min(window.innerWidth - 30, fsDrag.x + dx)) + 'px';
     fsBtn.style.top = Math.max(4, Math.min(window.innerHeight - 30, fsDrag.y + dy)) + 'px';
     fsBtn.style.right = 'auto';
+    fsBtn.style.opacity = '1';
   });
   fsBtn.addEventListener('pointerup', function () {
     if (!fsDrag) return;
     var moved = fsDrag.moved;
     fsDrag = null;
-    fsBtn.classList.remove('aios-hot');
+    fsBtn.style.opacity = '.65';
     if (moved) {
       var r = fsBtn.getBoundingClientRect();
       try { localStorage.setItem('aios.fspos', JSON.stringify({ x: r.left, y: r.top })); } catch (e) {}
@@ -342,9 +339,7 @@
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(function () {});
     } else {
-      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(function () {
-        try { screen.orientation.lock('landscape'); } catch (e) {}
-      }).catch(function () {});
+      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(function () {});
     }
   }
   document.addEventListener('fullscreenchange', function () {
@@ -355,10 +350,11 @@
   // -------------------------------------------------------------------------
   // Wake Lock
   // -------------------------------------------------------------------------
-  var wakeLock = null;
   function wake() {
     if (!navigator.wakeLock) return;
-    navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; }).catch(function () {});
+    navigator.wakeLock.request('screen').then(function (l) {
+      l.addEventListener('release', function () {});
+    }).catch(function () {});
   }
   wake();
 
@@ -377,6 +373,7 @@
   // Démarrage
   // -------------------------------------------------------------------------
   setTimeout(function () {
+    lastW = window.innerWidth;
     pollFocus();
     adaptScreen();
     wake();
