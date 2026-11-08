@@ -163,6 +163,7 @@ function proxyDesktopHttp(req, res) {
 }
 
 function proxyDesktopWs(req, socket, head) {
+  socket.setNoDelay(true); // latence : pas de tampon Nagle côté client
   const up = net.connect(VNC_UPSTREAM, '127.0.0.1', () => {
     const lines = [`${req.method} ${req.url} HTTP/1.1`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);

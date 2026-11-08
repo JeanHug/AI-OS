@@ -21,14 +21,17 @@
   var API = 'https://ai-os.hugdu77777.workers.dev';
 
   // -------------------------------------------------------------------------
-  // Jeton de bureau
+  // Jeton de bureau : ?s= de la page, sinon celui conservé par mobile.html
+  // (localStorage). Sans jeton, la surcouche se limite au bouton plein écran.
   // -------------------------------------------------------------------------
   function getSig() {
     try {
       var q = new URLSearchParams(location.search).get('s');
       if (q) return q;
-      return new URL(document.referrer || '').searchParams.get('s') || '';
-    } catch (e) { return ''; }
+      var saved = JSON.parse(localStorage.getItem('aios.sig') || 'null');
+      if (saved && saved.v && (!saved.exp || saved.exp > Math.floor(Date.now() / 1000))) return saved.v;
+    } catch (e) {}
+    return '';
   }
   var sig = getSig();
   function apiUrl(path) {
@@ -234,6 +237,12 @@
     }
     wake();
     if (lastFocus === 'text' && !kbOpen) openKb();
+    // Le focus vient de changer avec ce geste : on revérifie aussitôt (puis
+    // 350 ms après) pour ouvrir le clavier dans la foulée si un champ texte
+    // est actif — l'ouverture reste liée à une activation utilisateur.
+    pollFocus();
+    setTimeout(pollFocus, 350);
+    setTimeout(pollFocus, 1200);
   }
   window.addEventListener('touchstart', onGestureStart, { capture: true, passive: false });
   window.addEventListener('pointerdown', function () {

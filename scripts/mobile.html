@@ -5,7 +5,19 @@
 <meta http-equiv="refresh" content="0;url=/">
 <title>Bureau</title>
 <script>
-  // Les deux liens ouvrent la même interface noVNC classique.
+  // Étape courte : le jeton de bureau (?s=) est conservé pour la page finale
+  // (API : clavier automatique, adaptation d'écran), puis on rejoint le
+  // parcours classique (le pont pose le cookie, puis noVNC).
+  try {
+    var s = new URLSearchParams(location.search).get('s');
+    if (s) {
+      var m = s.match(/^(\d+)\./);
+      localStorage.setItem('aios.sig', JSON.stringify({
+        v: s,
+        exp: m ? Number(m[1]) : Math.floor(Date.now() / 1000) + 14400,
+      }));
+    }
+  } catch (e) {}
   location.replace('/' + location.search);
 </script>
 </head>

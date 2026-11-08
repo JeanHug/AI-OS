@@ -187,7 +187,7 @@ export default {
           "sleep 1.6",
           "setsid nohup env DISPLAY=:99 xfce4-session >/tmp/aios-xfce.log 2>&1 &",
           "sleep 1",
-          "setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &",
+          "setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &",
           "setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 &",
           "sleep 1.5",
           'xrandr 2>/dev/null | grep -o "current [0-9]* x [0-9]*" || true',
@@ -259,7 +259,7 @@ export default {
         });
       }
       const grant = await signDesktopGrant(env.VM_API_TOKEN);
-      return new Response(JSON.stringify({ ok: true, url: `${linuxPrimaryUrl}/?s=${grant}`, expires_in: 14400 }), {
+      return new Response(JSON.stringify({ ok: true, url: `${linuxPrimaryUrl}/mobile.html?s=${grant}`, expires_in: 14400 }), {
         headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
       });
     }
@@ -273,7 +273,7 @@ export default {
         });
       }
       const grant = await signDesktopGrant(env.VM_API_TOKEN);
-      return Response.redirect(`${linuxPrimaryUrl}/?s=${grant}`, 302);
+      return Response.redirect(`${linuxPrimaryUrl}/mobile.html?s=${grant}`, 302);
     }
 
     // 7. Route générale : Tunnels et Statut Global (/ ou /api/tunnels)
