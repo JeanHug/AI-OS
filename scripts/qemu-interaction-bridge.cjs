@@ -371,7 +371,9 @@ const server = http.createServer(async (req, res) => {
         return res.end();
       }
       if (path === '/') {
-        res.writeHead(302, { Location: '/vnc.html?autoconnect=true&resize=scale&path=websockify', 'Set-Cookie': grantCookie(req) });
+        // Mobile → client tactile ; ordinateur → noVNC classique.
+        const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(req.headers['user-agent'] || '');
+        res.writeHead(302, { Location: mobileUA ? '/mobile.html' : '/vnc.html?autoconnect=true&resize=scale&path=websockify', 'Set-Cookie': grantCookie(req) });
         return res.end();
       }
       return proxyDesktopHttp(req, res);

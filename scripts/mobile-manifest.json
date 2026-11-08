@@ -1,0 +1,13 @@
+{
+  "name": "AI OS — Bureau",
+  "short_name": "Bureau",
+  "description": "Bureau distant AI OS",
+  "start_url": "/mobile.html",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

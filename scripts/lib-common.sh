@@ -179,11 +179,13 @@ aios_guest_ensure_desktop() {
 # best-effort : n'échoue jamais l'étape.
 aios_guest_ensure_stream() {
   local -a spkgs; mapfile -t spkgs < <(aios_guest_stream_packages)
-  if aios_guest_ssh "$1" 300 "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${spkgs[*]}"; then
-    return 0
-  fi
-  aios_warn "Flux bureau interactif non installé (paquets ${spkgs[*]})."
-  return 1
+  aios_guest_ssh "$1" 300 "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${spkgs[*]}" \\
+    || aios_warn "Flux bureau interactif non installé (paquets ${spkgs[*]})."
+  # Client mobile + habillage PWA dans le répertoire noVNC (servi derrière
+  # l'auth du pont, au même titre que vnc.html). Téléchargements avec réessais.
+  local mbase="https://raw.githubusercontent.com/JeanHug/AI-OS/main/scripts"
+  aios_guest_ssh "$1" 120 "sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/mobile.html $mbase/mobile.html && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/manifest.json $mbase/mobile-manifest.json && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/icon-512.png $mbase/mobile-icon.png && sudo chmod 644 /usr/share/novnc/mobile.html /usr/share/novnc/manifest.json /usr/share/novnc/icon-512.png" \\
+    || aios_warn "Client mobile non déposé dans l'invité."
 }
 
 # Démarrage idempotent du flux interactif dans l'invité : x11vnc (VNC sur
