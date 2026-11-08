@@ -184,8 +184,8 @@ aios_guest_ensure_stream() {
   # Client mobile + habillage PWA dans le répertoire noVNC (servi derrière
   # l'auth du pont, au même titre que vnc.html). Téléchargements avec réessais.
   local mbase="https://raw.githubusercontent.com/JeanHug/AI-OS/main/scripts"
-  aios_guest_ssh "$1" 120 "sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/mobile.html $mbase/mobile.html && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/manifest.json $mbase/mobile-manifest.json && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/icon-512.png $mbase/mobile-icon.png && sudo chmod 644 /usr/share/novnc/mobile.html /usr/share/novnc/manifest.json /usr/share/novnc/icon-512.png" \
-    || aios_warn "Client mobile non déposé dans l'invité."
+  aios_guest_ssh "$1" 120 "sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/aios-overlay.js $mbase/aios-overlay.js && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/mobile.html $mbase/mobile.html && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/manifest.json $mbase/mobile-manifest.json && sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/share/novnc/icon-512.png $mbase/mobile-icon.png && sudo chmod 644 /usr/share/novnc/aios-overlay.js /usr/share/novnc/mobile.html /usr/share/novnc/manifest.json /usr/share/novnc/icon-512.png && grep -q aios-overlay.js /usr/share/novnc/vnc.html || sudo sed -i 's#</body>#<script src=aios-overlay.js></script></body>#' /usr/share/novnc/vnc.html" \
+    || aios_warn "Surcouche bureau non déposée dans l'invité."
 }
 
 # Démarrage idempotent du flux interactif dans l'invité : x11vnc (VNC sur
