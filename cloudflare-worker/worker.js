@@ -231,12 +231,16 @@ export default {
         targetVmUrl.searchParams.delete("password");
         targetVmUrl.searchParams.delete("pin");
 
-        const vmResponse = await fetch(targetVmUrl.toString(), {
+        const init = {
           method: request.method,
           headers: forwardHeaders,
           body: requestBodyText || undefined,
-          redirect: "follow"
-        });
+          redirect: "follow",
+        };
+        // Liaison de service directe (rapide, sans edge) ; repli sur l'URL publique.
+        const vmResponse = env.DESK
+          ? await env.DESK.fetch(targetVmUrl.toString(), init)
+          : await fetch(targetVmUrl.toString(), init);
 
         // Le pont d'interaction signale ses réponses par X-Linux-Daemon. Sans cet
         // en-tête, une réponse 404/502 vient du tunnel lui-même (pont absent) et

@@ -75,10 +75,13 @@ async function deploy() {
       console.log(`  secret ${name} : conservé (valeur existante).`);
     }
   }
+  // Liaison de service vers le Worker du bureau (relais /api/* sans passer par
+  // l'edge workers.dev — ce fetch inter-Workers y est bloqué).
+  bindings.push({ type: 'service', name: 'DESK', service: 'ai-os-desk', environment: 'production' });
 
   const metadata = {
     main_module: 'worker.js',
-    keep_bindings: ['secret_text'],
+    keep_bindings: ['secret_text', 'service'],
     bindings,
   };
 
