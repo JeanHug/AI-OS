@@ -373,8 +373,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (path === '/') {
         // Mobile → client tactile ; ordinateur → noVNC classique.
+        // Le jeton (?s=) est reporté dans l'URL finale : la surcouche bureau
+        // (clavier automatique, adaptation d'écran) en a besoin.
+        const qs = new URL(req.url, 'http://x').searchParams;
+        const tok = qs.get('s') || qs.get('tok') || '';
+        const enc = encodeURIComponent(tok);
         const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(req.headers['user-agent'] || '');
-        res.writeHead(302, { Location: mobileUA ? '/mobile.html' : '/vnc.html?autoconnect=true&resize=scale&path=websockify', 'Set-Cookie': grantCookie(req) });
+        const target = mobileUA
+          ? '/mobile.html?s=' + enc
+          : '/vnc.html?autoconnect=true&resize=scale&path=websockify&s=' + enc;
+        res.writeHead(302, { Location: target, 'Set-Cookie': grantCookie(req) });
         return res.end();
       }
       return proxyDesktopHttp(req, res);

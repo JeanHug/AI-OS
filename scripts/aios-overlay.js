@@ -31,6 +31,9 @@
       var saved = JSON.parse(localStorage.getItem('aios.sig') || 'null');
       if (saved && saved.v && (!saved.exp || saved.exp > Math.floor(Date.now() / 1000))) return saved.v;
     } catch (e) {}
+    var m = document.cookie.match(/(?:^|;\s*)aios_t=([^;]+)/);
+    if (m) { try { return decodeURIComponent(m[1]); } catch (e) {} }
+    if (window.name && window.name.indexOf('aios:') === 0) return window.name.slice(5);
     return '';
   }
   var sig = getSig();
