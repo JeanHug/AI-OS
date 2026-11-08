@@ -150,7 +150,7 @@ function proxyDesktopHttp(req, res) {
     host: '127.0.0.1', port: VNC_UPSTREAM, path: req.url, method: req.method,
     headers: { ...req.headers, host: `127.0.0.1:${VNC_UPSTREAM}` },
   }, (up) => {
-    res.writeHead(up.statusCode || 502, up.headers);
+    res.writeHead(up.statusCode || 502, { ...up.headers, 'cache-control': 'no-store' });
     up.pipe(res);
   });
   upstream.on('error', () => {
@@ -380,8 +380,8 @@ const server = http.createServer(async (req, res) => {
         const enc = encodeURIComponent(tok);
         const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(req.headers['user-agent'] || '');
         const target = mobileUA
-          ? '/mobile.html?s=' + enc
-          : '/vnc.html?autoconnect=true&resize=scale&path=websockify&s=' + enc;
+          ? '/mobile.html?s=' + enc + '&v=' + Date.now()
+          : '/vnc.html?autoconnect=true&resize=scale&path=websockify&s=' + enc + '&v=' + Date.now();
         res.writeHead(302, { Location: target, 'Set-Cookie': grantCookie(req) });
         return res.end();
       }

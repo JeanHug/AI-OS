@@ -193,6 +193,8 @@ export default {
           "pkill -x xfce4-session 2>/dev/null; pkill -x xfwm4 2>/dev/null; pkill -x xfdesktop 2>/dev/null; pkill -x xfce4-panel 2>/dev/null; pkill -x xfsettingsd 2>/dev/null",
           "pkill -x x11vnc 2>/dev/null; pkill -x websockify 2>/dev/null; pkill -x Xvfb 2>/dev/null",
           "sleep 1",
+          "pkill -9 -x x11vnc 2>/dev/null; pkill -9 -x websockify 2>/dev/null; pkill -9 -x Xvfb 2>/dev/null",
+          "for i in 1 2 3 4 5 6 7 8; do if ss -ltn | grep -q ':5900 ' || ss -ltn | grep -q ':6080 '; then sleep 1; else break; fi; done",
           `setsid nohup Xvfb :99 -screen 0 ${w}x${h}x24 >/tmp/aios-xvfb.log 2>&1 &`,
           "sleep 1.6",
           "setsid nohup env DISPLAY=:99 xfce4-session >/tmp/aios-xfce.log 2>&1 &",

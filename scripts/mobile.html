@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <title>Bureau</title>
 <script>
-  // Étape courte : le jeton de bureau (?s=) est conservé (localStorage, cookie
-  // lisible, nom de fenêtre), le cookie d'autorisation est posé, puis on ouvre
-  // l'interface noVNC classique avec le jeton dans l'URL.
+  // Parcours court : le jeton de bureau (?s=) est conservé, le cookie
+  // d'autorisation est posé par une VRAIE navigation vers '/', puis noVNC
+  // s'ouvre avec le jeton dans l'URL et un horodatage unique — la page ne
+  // vient JAMAIS du cache du navigateur.
   try {
     var s = new URLSearchParams(location.search).get('s') || '';
     if (s) {
@@ -15,8 +16,15 @@
       localStorage.setItem('aios.sig', JSON.stringify({ v: s, exp: exp }));
       document.cookie = 'aios_t=' + encodeURIComponent(s) + '; Path=/; Max-Age=43200; SameSite=Lax';
       window.name = 'aios:' + s;
-      fetch('/?s=' + encodeURIComponent(s), { redirect: 'manual' }).catch(function () {});
-      location.replace('/vnc.html?s=' + encodeURIComponent(s) + '&autoconnect=true&resize=scale&path=websockify');
+      var hop = Number(sessionStorage.getItem('aios.hop') || 0);
+      if (!hop || Date.now() - hop > 60000) {
+        sessionStorage.setItem('aios.hop', String(Date.now()));
+        location.replace('/?s=' + encodeURIComponent(s));
+      } else {
+        sessionStorage.removeItem('aios.hop');
+        location.replace('/vnc.html?s=' + encodeURIComponent(s) + '&v=' + Date.now() +
+          '&autoconnect=true&resize=scale&path=websockify');
+      }
     } else {
       location.replace('/');
     }
