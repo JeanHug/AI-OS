@@ -200,9 +200,9 @@ aios_guest_start_stream() {
   # Un service par appel, sur le patron de aios_guest_start_desktop (prouvé).
   # L'état se teste par le port d'écoute (ss), jamais par pgrep -f : la ligne
   # de commande contenant « websockify » se matcherait elle-même (piège classique).
-  aios_guest_ssh "$1" 20 "ss -ltn 2>/dev/null | grep -q ':5900 ' && exit 0; command -v x11vnc >/dev/null || exit 0; setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null & exit 0" \
+  aios_guest_ssh "$1" 20 "if ss -ltn 2>/dev/null | grep -q ':5900 '; then timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/5900; head -c 3 <&3' 2>/dev/null | grep -q RFB && exit 0; pkill -9 -x x11vnc 2>/dev/null; sleep 0.5; fi; command -v x11vnc >/dev/null || exit 0; setsid nohup x11vnc -display $AIOS_GUEST_DISPLAY -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 </dev/null & exit 0" \
     || aios_warn "x11vnc non démarré dans l'invité."
-  aios_guest_ssh "$1" 20 "ss -ltn 2>/dev/null | grep -q ':6080 ' && exit 0; command -v websockify >/dev/null || exit 0; setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null & exit 0" \
+  aios_guest_ssh "$1" 20 "if ss -ltn 2>/dev/null | grep -q ':6080 '; then curl -s -o /dev/null -m 2 http://127.0.0.1:6080/ && exit 0; pkill -9 -x websockify 2>/dev/null; sleep 0.5; fi; command -v websockify >/dev/null || exit 0; setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 </dev/null & exit 0" \
     || aios_warn "websockify non démarré dans l'invité."
 }
 

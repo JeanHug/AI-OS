@@ -275,7 +275,7 @@ export default {
         });
       }
       const grant = await signDesktopGrant(env.VM_API_TOKEN);
-      return new Response(JSON.stringify({ ok: true, url: `${linuxPrimaryUrl}/mobile.html?s=${grant}`, expires_in: 14400 }), {
+      return new Response(JSON.stringify({ ok: true, url: `${linuxPrimaryUrl}/mobile.html?s=${grant}&v=${Date.now()}`, expires_in: 14400 }), {
         headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
       });
     }
