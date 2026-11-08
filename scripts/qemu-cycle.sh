@@ -53,7 +53,7 @@ start_tunnel() {
   # distante ingress → pont :3001). Le jeton connecteur est récupéré à chaque
   # démarrage avec CLOUDFLARE_TOKEN : l'URL publique ne change JAMAIS.
   local tok
-  tok=$(curl -fsS --max-time 30 -H "Authorization: Bearer ${CLOUDFLARE_TOKEN:-}" \
+  tok=$(curl -fsS --retry 3 --retry-all-errors --max-time 30 -H "Authorization: Bearer ${CLOUDFLARE_TOKEN:-}" \
     "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID:-}/cfd_tunnel/${AIOS_TUNNEL_ID}/token" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("result") or "", end="")') || true
   [[ -n "$tok" ]] || aios_die "Jeton connecteur du tunnel durable indisponible (CLOUDFLARE_TOKEN/CLOUDFLARE_ID)."
@@ -246,8 +246,15 @@ bridge)
 tunnel)
   if [[ ! -x "$AIOS_WORK_DIR/cloudflared" ]]; then
     aios_log "Téléchargement de cloudflared..."
-    curl -fsSL "$CLOUDFLARED_URL" -o "$AIOS_WORK_DIR/cloudflared"
-    chmod +x "$AIOS_WORK_DIR/cloudflared"
+    dl_ok=0
+    for _ in 1 2 3 4 5; do
+      if curl -fsSL --retry 2 --max-time 300 "$CLOUDFLARED_URL" -o "$AIOS_WORK_DIR/cloudflared"; then
+        chmod +x "$AIOS_WORK_DIR/cloudflared" && dl_ok=1 && break
+      fi
+      aios_warn "Téléchargement de cloudflared échoué (réseau) : nouvelle tentative..."
+      sleep 5
+    done
+    [[ "$dl_ok" == 1 ]] || aios_die "cloudflared impossible à télécharger après 5 tentatives."
   fi
   start_tunnel
   if ! wait_tunnel_registered; then
