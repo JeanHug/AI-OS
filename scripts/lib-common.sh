@@ -160,6 +160,11 @@ aios_guest_ensure_desktop() {
   aios_guest_ssh "$1" 300 'sudo apt-get update -qq -o DPkg::Lock::Timeout=300' || true
   aios_guest_ssh "$1" 420 "$install_cmd" && return 0
   return 1
+  # Google Chrome (navigateur, idempotent — les index apt sont frais).
+  if ! aios_guest_ssh "$1" 15 'command -v google-chrome-stable >/dev/null 2>&1'; then
+    aios_guest_ssh "$1" 300 'curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o DPkg::Lock::Timeout=300 /tmp/chrome.deb' \
+      || aios_warn "Chrome non installé dans l'invité."
+  fi
 }
 
 # Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
