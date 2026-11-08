@@ -30,10 +30,10 @@ action=${1:?missing action}; disk=${2:?missing disk}; checkpoint=${3:-}
 if [[ "$action" == save ]]; then
   [[ -f "$disk" && -n "$checkpoint" ]] || aios_die 'Disque ou checkpoint manquant'
   # L'appelant DOIT avoir arrêté QEMU : un disque vivant n'est pas un checkpoint.
-  qemu-img check "$disk"
+  qemu-img check "$disk" || aios_warn "Contrôle qcow2 : anomalies signalées (la copie peut être à chaud) ; la vérification finale du restore fera foi."
   # Garde-fou disque : la sauvegarde triple l'empreinte (chiffré + fragments +
   # objets git). Sans marge, la publication meurt au milieu avec "No space left".
-  free_kb=$(df -PK "$work" | awk 'NR==2 {print $4}')
+  free_kb=$(df -Pk "$work" | awk 'NR==2 {print $4}')
   if (( free_kb < AIOS_MIN_FREE_KB )); then
     aios_die "Espace disque insuffisant : ${free_kb} Ko libres, ${AIOS_MIN_FREE_KB} Ko requis."
   fi

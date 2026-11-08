@@ -155,9 +155,9 @@ function proxyDesktopHttp(req, res) {
   });
   upstream.on('error', () => {
     if (res.headersSent) return res.end();
-    // Jamais d'erreur JSON sur les routes navigateur : page sobre, HTML.
-    res.writeHead(502, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end('<!doctype html><meta charset="utf-8"><title>AI OS</title><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0a0a0a;color:#eee"><div style="text-align:center"><p style="font-size:20px">Le bureau redémarre…</p><p style="opacity:.7">Réessayez dans une minute.</p></div></body>');
+    // Repli navigateur : reconnexion silencieuse, jamais de message d'erreur.
+    res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Refresh': '4' });
+    res.end('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="4"><title>AI OS</title><style>@keyframes spin{to{transform:rotate(360deg)}}</style><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0a0a0a;color:#eee"><div style="text-align:center"><div style="width:42px;height:42px;margin:0 auto 18px;border:3px solid #2a2a2a;border-top-color:#eee;border-radius:50%;animation:spin 1s linear infinite"></div><p style="font-size:18px;letter-spacing:.04em">AI OS</p></div></body>');
   });
   req.pipe(upstream);
 }

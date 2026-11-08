@@ -51,6 +51,7 @@ cloudflare-worker/desk-worker.js  lien interactif (transparence HTTP/WebSocket v
 | Workflow | Rôle |
 |---|---|
 | `AI OS QEMU - relais et sauvegarde` | production : le cycle complet, découpé en étapes visibles (ci-dessous) |
+| `AI OS QEMU - veille du relais` | filet 24/7 (toutes les 15 min) : relance un cycle si plus aucun n'est actif |
 | `AI OS QEMU - capture expérimentale` | diagnostic jetable, sans sauvegarde, publié sous `tunnels-linux-live.json` |
 | `AI OS QEMU - validation experimentale` | vérifie Ubuntu 26.10 + noyau 7.3.1 (KVM obligatoire, jamais de TCG) |
 
@@ -65,8 +66,8 @@ Déployer le tunnel cloudflared                           ~20 s
 Publier l'URL et vérifier l'API d'interaction            ~5 s
 Phase de production (période d'utilisation)               5 h 00   ← le service est en ligne
 Créer et lancer le workflow suivant                      ~2 s
-Chevauchement — continuer à servir les requêtes          30 min   ← le successeur restaure
-Auto-arrêt propre et sauvegarde chiffrée                 ~5 min
+Chevauchement — sauvegarde à chaud puis service continu  30 min   ← le successeur restaure
+Auto-arrêt propre de l'invité                            ~2 min
 ```
 
 Chaque ligne est une étape visible dans l'onglet Actions. Les durées de la
@@ -91,16 +92,22 @@ liaison VPC vers le tunnel durable, et l'authentification reste au pont.
 
 La production dure 5 h 00 ; le cycle suivant est alors **créé et lancé** comme
 nouveau run de workflow, avec l'identifiant du cycle courant en paramètre.
-Pendant le **chevauchement** (30 min), le successeur attend le `CHECKPOINT`,
-restaure, démarre et publie son tunnel — puis le cycle courant s'auto-arrête
-et sauvegarde. La coupure perçue est nulle tant que la restauration du
-successeur tient dans le chevauchement.
+Au **début du chevauchement** (30 min), le cycle courant publie son checkpoint
+en **sauvegarde à chaud** (l'invité reste vivant, `sync` avant la copie) : le
+successeur attend ce checkpoint, restaure, démarre et publie son tunnel
+**pendant que l'ancien continue de servir** — il n'y a aucun trou de service.
+Le cycle courant s'auto-arrête ensuite sans republier (personne ne
+consommerait cette génération).
+
+Un workflow de **veille** (toutes les 15 min) relance un cycle si plus aucun
+n'est actif : la chaîne se rétablit toute seule après n'importe quel plantage.
 
 Contraintes mesurées (run `42384041709`, checkpoint de 1,9 Go) :
 sauvegarde ≈ 5 min, restauration + démarrage ≈ 8 min ; les deux croissent
-linéairement avec la taille du disque. Jauge critique : entre 8 et 12 Go de
-disque, le chevauchement de 30 min ne suffit plus — voir les options d'évolution
-(base dorée immuable + deltas par bitmap QEMU) dans la documentation de projet.
+linéairement avec la taille du disque. Le chevauchement de 30 min couvre la
+restauration du successeur avec marge. Jauge critique : entre 8 et 12 Go de
+disque, la marge fond — voir les options d'évolution (base dorée immuable +
+deltas par bitmap QEMU) dans la documentation de projet.
 
 Contraintes dures du runner GitHub (dépôt **public** : 4 vCPU, 16 Go RAM,
 **14 Go SSD**) : ne jamais rendre ce dépôt privé (2 vCPU / 8 Go), et surveiller

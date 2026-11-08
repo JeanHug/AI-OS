@@ -1,0 +1,49 @@
+name: AI OS - veille du relais
+# Filet de sécurité 24/7 : si aucun cycle de production n'est actif (plantage,
+# annulation, coupure imprévue), ce workflow en relance un automatiquement.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  veille:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Relancer le relais s'il n'est plus actif
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, urllib.request
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          base = f'https://api.github.com/repos/{repo}'
+
+          def api(path, data=None):
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(data).encode() if data is not None else None,
+                  headers={
+                      'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                      'Accept': 'application/vnd.github+json',
+                      'User-Agent': 'aios-watchdog',
+                  },
+                  method='POST' if data is not None else 'GET')
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  body = r.read()
+                  return r.status, (json.loads(body) if body else None)
+
+          _, runs = api('/actions/workflows/qemu-durable.yml/runs?per_page=20')
+          actifs = [r['id'] for r in (runs or {}).get('workflow_runs', [])
+                    if r.get('status') in ('queued', 'in_progress', 'requested', 'waiting')]
+          if actifs:
+              print('Relais actif :', actifs)
+          else:
+              print('Aucun relais actif : relance du cycle.')
+              api('/actions/workflows/qemu-durable.yml/dispatches',
+                  {'ref': 'main', 'inputs': {'predecessor_run_id': '', 'test_relay': False}})
+              print('Cycle relancé.')
+          EOF

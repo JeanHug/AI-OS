@@ -110,37 +110,44 @@ async function deploy() {
 
 async function deployDesk() {
   const vpcToken = process.env.CLOUDFLARE_VPC_TOKEN;
-  if (!vpcToken) {
-    console.error('CLOUDFLARE_VPC_TOKEN manquant : déploiement de « ai-os-desk » impossible.');
-    process.exit(1);
-  }
   const deskPath = path.join(__dirname, '..', 'cloudflare-worker', 'desk-worker.js');
   if (!fs.existsSync(deskPath)) { console.error(`Fichier introuvable : ${deskPath}`); process.exit(1); }
   const deskContent = fs.readFileSync(deskPath, 'utf8');
 
-  const conf = fs.readFileSync(path.join(__dirname, '..', 'config', 'aios.conf'), 'utf8');
-  const tunnelId = (conf.match(/^AIOS_TUNNEL_ID="([^"]+)"/m) || [])[1];
-  if (!tunnelId) { console.error('AIOS_TUNNEL_ID absent de config/aios.conf.'); process.exit(1); }
+  // Deux chemins :
+  //  - CLOUDFLARE_VPC_TOKEN present : premiere mise en place, la liaison VPC
+  //    est declaree et validee a l'upload ;
+  //  - sinon : la liaison EXISTANTE est conservee via keep_bindings (aucune
+  //    revalidation, le jeton habituel suffit).
+  let metadata = { main_module: 'worker.js', keep_bindings: ['vpc_network'] };
+  let bearer = apiToken;
+  if (vpcToken) {
+    const conf = fs.readFileSync(path.join(__dirname, '..', 'config', 'aios.conf'), 'utf8');
+    const tunnelId = (conf.match(/^AIOS_TUNNEL_ID="([^"]+)"/m) || [])[1];
+    if (!tunnelId) { console.error('AIOS_TUNNEL_ID absent de config/aios.conf.'); process.exit(1); }
+    metadata = {
+      main_module: 'worker.js',
+      keep_bindings: ['vpc_network'],
+      bindings: [{ type: 'vpc_network', name: 'VPC', tunnel_id: tunnelId, remote: true }],
+    };
+    bearer = vpcToken;
+  }
 
-  console.log('Déploiement du Worker "ai-os-desk" (lien interactif, liaison VPC)…');
-  const metadata = {
-    main_module: 'worker.js',
-    keep_bindings: ['vpc_network'],
-    bindings: [{ type: 'vpc_network', name: 'VPC', tunnel_id: tunnelId, remote: true }],
-  };
+  console.log('Deploiement du Worker "ai-os-desk" (lien interactif, liaison VPC)...');
   const boundary = '----CFDeskBoundary' + Date.now();
   const bodyParts = [
     `--${boundary}\r\nContent-Disposition: form-data; name="metadata"; filename="metadata.json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n`,
     `--${boundary}\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n${deskContent}\r\n`,
     `--${boundary}--\r\n`,
   ];
-  const res = await apiCall('PUT', '/workers/scripts/ai-os-desk', Buffer.from(bodyParts.join('')), 'multipart/form-data; boundary=' + boundary, vpcToken);
+  const res = await apiCall('PUT', '/workers/scripts/ai-os-desk', Buffer.from(bodyParts.join('')), 'multipart/form-data; boundary=' + boundary, bearer);
   if (res.status !== 200 || !res.body?.success) {
-    console.error('Échec du déploiement ai-os-desk :', JSON.stringify(res.body));
+    console.error('Echec du deploiement ai-os-desk :', JSON.stringify(res.body));
+    if (!vpcToken) console.error("Si le script n'existe pas encore, fournir CLOUDFLARE_VPC_TOKEN pour declarer la liaison VPC.");
     process.exit(1);
   }
-  const sub = await apiCall('POST', '/workers/scripts/ai-os-desk/subdomain', Buffer.from(JSON.stringify({ enabled: true })), 'application/json', vpcToken);
-  console.log('  sous-domaine workers.dev :', sub.body?.result?.enabled ? 'activé' : 'état ' + sub.status);
+  const sub = await apiCall('POST', '/workers/scripts/ai-os-desk/subdomain', Buffer.from(JSON.stringify({ enabled: true })), 'application/json', bearer);
+  console.log('  sous-domaine workers.dev :', sub.body?.result?.enabled ? 'active' : 'etat ' + sub.status);
   console.log('Lien interactif : https://ai-os-desk.hugdu77777.workers.dev');
 }
 

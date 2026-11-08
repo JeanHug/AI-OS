@@ -120,8 +120,24 @@ monitor_loop() {
   aios_log "[$label] terminé après $((duration / 60)) min."
 }
 
+save_checkpoint() {
+  # Une seule sauvegarde par cycle, publiée au DÉBUT du chevauchement : le
+  # successeur restaure pendant que l'ancien continue de servir — aucun trou.
+  # La copie se fait à chaud (invité vivant, sync avant) : cohérente au sens
+  # journal ext4. Le stop ne sauvegarde plus : personne ne consommerait cette
+  # génération, et réécrire la branche désynchroniserait le téléchargement
+  # en cours du successeur.
+  [[ "$(state_read saved)" == "1" ]] && return 0
+  aios_guest_ssh sshopts 60 'sudo sync' || true
+  if bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"; then
+    state_write saved 1
+    return 0
+  fi
+  return 1
+}
+
 emergency_save() {
-  bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:-crash}" || aios_warn "Sauvegarde d'urgence échouée."
+  save_checkpoint || aios_warn "Sauvegarde d'urgence échouée."
 }
 
 # ===========================================================================
@@ -294,20 +310,21 @@ dispatch)
 overlap)
   duration="$AIOS_OVERLAP_SECONDS"
   [[ "${TEST_RELAY:-false}" == true ]] && duration=60 && aios_log "Mode test : chevauchement ramené à ${duration}s."
-  aios_log "CHEVAUCHEMENT : le service continue de répondre $((duration / 60)) min pendant que le successeur restaure."
+  aios_log "CHEVAUCHEMENT : sauvegarde à chaud du checkpoint, puis service continu $((duration / 60)) min pendant que le successeur restaure."
+  save_checkpoint || aios_die "Sauvegarde du checkpoint impossible : le successeur ne pourra pas démarrer."
   monitor_loop "$duration" "chevauchement"
   ;;
 
 stop)
-  aios_log "Auto-arrêt : arrêt propre de l'invité avant sauvegarde chiffrée."
+  aios_log "Auto-arrêt : arrêt propre de l'invité (le checkpoint est déjà publié depuis le chevauchement)."
   aios_guest_ssh sshopts 60 'sudo sync && sudo shutdown -h now' || true
   stopped=0
   for _ in $(seq 1 120); do
     pid_alive "$(file_pid qemu.pid)" || { stopped=1; break; }
     sleep 2
   done
-  [[ "$stopped" == 1 ]] || aios_die "Arrêt non confirmé : sauvegarde annulée pour ne pas publier un disque vivant."
-  bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"
+  [[ "$stopped" == 1 ]] || aios_warn "Arrêt non confirmé : on poursuit (le checkpoint est déjà publié)."
+  save_checkpoint || aios_die "Sauvegarde chiffrée impossible."
   kill "$(file_pid bridge.pid)" 2>/dev/null || true
   kill "$(file_pid tunnel.pid)" 2>/dev/null || true
   kill "$(file_pid vncfwd.pid)" 2>/dev/null || true
