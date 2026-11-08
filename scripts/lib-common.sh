@@ -141,37 +141,40 @@ aios_guest_ensure_desktop() {
   aios_log "Attente de la fin de cloud-init dans l'invité..."
   aios_guest_ssh "$1" 300 'cloud-init status --wait 2>/dev/null || true' || aios_warn "cloud-init non confirmé : on continue."
 
-  # 2. que manque-t-il ?
+  # 2. paquets du bureau : on installe seulement ce qui manque.
   local missing
   missing=$(aios_guest_ssh "$1" 30 'for t in startxfce4 Xvfb scrot xdotool xclip wmctrl import; do command -v "$t" >/dev/null || echo "$t"; done' 2>/dev/null || echo "ssh-indisponible")
-  if [[ -z "$missing" ]]; then
-    aios_log "Bureau et outils déjà installés — rien à faire."
-    return 0
+  if [[ -n "$missing" ]]; then
+    aios_log "Manquants : $(echo "$missing" | tr '\n' ' ') — installation..."
+    local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
+    local install_cmd="sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${pkgs[*]}"
+    if ! aios_guest_ssh "$1" 420 "$install_cmd"; then
+      aios_warn "Première tentative d'installation échouée : mise à jour des index puis nouvel essai."
+      aios_guest_ssh "$1" 300 'sudo apt-get update -qq -o DPkg::Lock::Timeout=300' || true
+      aios_guest_ssh "$1" 420 "$install_cmd" || aios_warn "Paquets du bureau incomplets."
+    fi
   fi
-  aios_log "Manquants : $(echo "$missing" | tr '\n' ' ') — installation..."
 
-  # 3. installation avec attente bornée du verrou dpkg (jamais de blocage).
-  local -a pkgs; mapfile -t pkgs < <(aios_guest_packages)
-  local install_cmd="sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300 ${pkgs[*]}"
-  aios_guest_ssh "$1" 420 "$install_cmd" && return 0
-
-  # 4. seconde chance : rafraîchir les index, puis réessayer.
-  aios_warn "Première tentative d'installation échouée : mise à jour des index puis nouvel essai."
-  aios_guest_ssh "$1" 300 'sudo apt-get update -qq -o DPkg::Lock::Timeout=300' || true
-  aios_guest_ssh "$1" 420 "$install_cmd" && return 0
-  return 1
-  # Google Chrome (navigateur, idempotent — les index apt sont frais).
+  # 3. Google Chrome (navigateur, idempotent).
   if ! aios_guest_ssh "$1" 15 'command -v google-chrome-stable >/dev/null 2>&1'; then
     aios_guest_ssh "$1" 300 'curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o DPkg::Lock::Timeout=300 /tmp/chrome.deb' \
       || aios_warn "Chrome non installé dans l'invité."
   fi
-  # Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
-  if [ -f /usr/share/applications/google-chrome.desktop ]; then
-    aios_guest_ssh "$1" 20 'd=$(xdg-user-dir DESKTOP 2>/dev/null || echo /home/aios/Desktop); mkdir -p "$d"; cp /usr/share/applications/google-chrome.desktop "$d/" && chmod +x "$d/google-chrome.desktop"' \
-      || aios_warn "Raccourci bureau Chrome non posé."
-  fi
-}
 
+  # 4. Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
+  aios_guest_ssh "$1" 20 'command -v google-chrome-stable >/dev/null 2>&1 && { d=$(xdg-user-dir DESKTOP 2>/dev/null || echo /home/aios/Desktop); mkdir -p "$d"; cp /usr/share/applications/google-chrome.desktop "$d/" && chmod +x "$d/google-chrome.desktop"; }' \
+    || aios_warn "Raccourci bureau Chrome non posé."
+
+  # 5. Fond d'écran blanc, écrit comme fichier de canal xfconf (la session n'est
+  #    pas encore lancée : pas de D-Bus). Xvfb nomme la sortie « screen » →
+  #    la propriété est monitorscreen. Idempotent : on n'écrase pas un fichier
+  #    déjà présent.
+  aios_guest_ssh "$1" 20 'mkdir -p ~/.config/xfce4/xfconf/xfce-perchannel-xml' || true
+  aios_guest_ssh "$1" 20 'test -f /home/aios/white.png || printf %s iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC | base64 -d > /home/aios/white.png' || aios_warn "Fond blanc non écrit."
+  aios_guest_ssh "$1" 20 'test -f ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml || printf %s PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KCjxjaGFubmVsIG5hbWU9InhmY2U0LWRlc2t0b3AiIHZlcnNpb249IjEuMCI+CiAgPHByb3BlcnR5IG5hbWU9ImJhY2tkcm9wIiB0eXBlPSJlbXB0eSI+CiAgICA8cHJvcGVydHkgbmFtZT0ic2NyZWVuMCIgdHlwZT0iZW1wdHkiPgogICAgICA8cHJvcGVydHkgbmFtZT0ibW9uaXRvcnNjcmVlbiIgdHlwZT0iZW1wdHkiPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+CiAgICAgICAgICA8cHJvcGVydHkgbmFtZT0iY29sb3Itc3R5bGUiIHR5cGU9ImludCIgdmFsdWU9IjEiLz4KICAgICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJpbWFnZS1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iNSIvPgogICAgICAgICAgPHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii9ob21lL2Fpb3Mvd2hpdGUucG5nIi8+CiAgICAgICAgICA8cHJvcGVydHkgbmFtZT0icmdiYSIgdHlwZT0ic3RyaW5nIiB2YWx1ZT0iNjU1MzUsNjU1MzUsNjU1MzUsNjU1MzUiLz4KICAgICAgICA8L3Byb3BlcnR5PgogICAgICA8L3Byb3BlcnR5PgogICAgICA8cHJvcGVydHkgbmFtZT0ibW9uaXRvcjAiIHR5cGU9ImVtcHR5Ij4KICAgICAgICA8cHJvcGVydHkgbmFtZT0id29ya3NwYWNlMCIgdHlwZT0iZW1wdHkiPgogICAgICAgICAgPHByb3BlcnR5IG5hbWU9ImNvbG9yLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSIxIi8+CiAgICAgICAgICA8cHJvcGVydHkgbmFtZT0iaW1hZ2Utc3R5bGUiIHR5cGU9ImludCIgdmFsdWU9IjUiLz4KICAgICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJsYXN0LWltYWdlIiB0eXBlPSJzdHJpbmciIHZhbHVlPSIvaG9tZS9haW9zL3doaXRlLnBuZyIvPgogICAgICAgICAgPHByb3BlcnR5IG5hbWU9InJnYmEiIHR5cGU9InN0cmluZyIgdmFsdWU9IjY1NTM1LDY1NTM1LDY1NTM1LDY1NTM1Ii8+CiAgICAgICAgPC9wcm9wZXJ0eT4KICAgICAgPC9wcm9wZXJ0eT4KICAgIDwvcHJvcGVydHk+CiAgPC9wcm9wZXJ0eT4KPC9jaGFubmVsPgo= | base64 -d > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml' \
+    || aios_warn "Configuration du fond blanc non écrite."
+  return 0
+}
 # Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
 # best-effort : n'échoue jamais l'étape.
 aios_guest_ensure_stream() {
