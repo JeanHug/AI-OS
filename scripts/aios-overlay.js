@@ -18,6 +18,13 @@
 
   var API = 'https://ai-os.hugdu77777.workers.dev';
 
+  // Réglages natifs de noVNC activés avant son démarrage : reconnexion
+  // automatique si elle est disponible dans cette version.
+  try {
+    localStorage.setItem('reconnect', 'true');
+    localStorage.setItem('reconnect_delay', '3000');
+  } catch (e) {}
+
   // -------------------------------------------------------------------------
   // Jeton de bureau
   // -------------------------------------------------------------------------
@@ -110,20 +117,35 @@
     return { w: w, h: h };
   }
 
-  var resizeAttempts = 0;
+  var resizeAttempts = 0, resizeBusy = false;
+
+  // Après un recalage, la connexion VNC retombe : on relance la connexion de
+  // noVNC (son bouton n'est cliquable que s'il est déconnecté) tant qu'il
+  // faut. La page ne se recharge PAS : le plein écran est conservé.
+  function healConnect(deadlineMs) {
+    var btn = document.getElementById('noVNC_connect_button');
+    if (btn && btn.offsetParent !== null && !btn.disabled) {
+      try { btn.click(); buzz(10); } catch (e) {}
+    }
+    if (Date.now() < deadlineMs) setTimeout(function () { healConnect(deadlineMs); }, 2000);
+  }
+
   function adaptScreen() {
     lastW = window.innerWidth;
-    if (!sig || resizeAttempts >= 2) return;
+    if (!sig || resizeBusy || resizeAttempts >= 6) return;
+    resizeBusy = true;
     fetch(apiUrl('/api/desktop/geom'), { method: 'GET' })
       .then(function (r) { return r.json(); })
       .then(function (g) {
-        if (!g || !g.ok) return;
+        if (!g || !g.ok) { resizeBusy = false; return; }
         var t = targetGeom();
-        // Décision fondée sur la LARGEUR uniquement (comme demandé) : les
-        // changements de hauteur (clavier, plein écran) ne redémarrent jamais
-        // l'affichage — c'est eux qui déconnectaient noVNC.
-        var widthBad = Math.abs(g.width - t.w) > Math.max(60, t.w * 0.10);
-        if (!widthBad) { resizeAttempts = 0; return; }
+        // Format réel de la zone visible : largeur ET hauteur. Le plein écran
+        // recalcé donc le bureau sur la nouvelle taille (et rétablit en le
+        // quittant). Seuls les vrais changements d'affichage appellent ceci :
+        // le clavier du téléphone (hauteur seule) n'y touche jamais.
+        var widthBad = Math.abs(g.width - t.w) > Math.max(24, t.w * 0.025);
+        var heightBad = Math.abs(g.height - t.h) > Math.max(24, t.h * 0.025);
+        if (!widthBad && !heightBad) { resizeAttempts = 0; resizeBusy = false; return; }
         resizeAttempts++;
         say('Adaptation de l’écran à votre appareil…', 6000);
         return fetch(apiUrl('/api/desktop/resize'), {
@@ -131,19 +153,11 @@
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({ width: t.w, height: t.h }),
         }).then(function () {
-          // Le redimensionnement redémarre l'affichage de la VM : la connexion
-          // retombe. On recharge la page juste après pour se reconnecter seul.
-          setTimeout(function () {
-            try {
-              var last = Number(sessionStorage.getItem('aios.reload') || 0);
-              if (Date.now() - last < 90000) return;
-              sessionStorage.setItem('aios.reload', String(Date.now()));
-            } catch (e) {}
-            location.reload();
-          }, 8000);
-        });
+          resizeBusy = false;
+          healConnect(Date.now() + 30000);
+        }).catch(function () { resizeBusy = false; });
       })
-      .catch(function () {});
+      .catch(function () { resizeBusy = false; });
   }
   window.addEventListener('resize', function () {
     // Un changement de LARGEUR = rotation ou nouvel affichage → on adapte.
@@ -151,10 +165,11 @@
     if (window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
   });
   window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 450); });
-  // NB : le plein écran ne déclenche PAS d'adaptation — seul un changement de
-  // largeur (rotation / appareil) redémarre l'affichage de la VM.
+  // Le plein écran RECALE le bureau sur la nouvelle taille (et rétablit l'ancien
+  // format en le quittant) ; la reconnexion est ensuite automatique.
+  document.addEventListener('fullscreenchange', function () { setTimeout(adaptScreen, 350); });
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) setTimeout(adaptScreen, 400);
+    if (!document.hidden && window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
   });
 
   // -------------------------------------------------------------------------
