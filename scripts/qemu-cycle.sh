@@ -129,10 +129,15 @@ save_checkpoint() {
   # en cours du successeur.
   [[ "$(state_read saved)" == "1" ]] && return 0
   aios_guest_ssh sshopts 60 'sudo sync' || true
-  if bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"; then
-    state_write saved 1
-    return 0
-  fi
+  local attempt
+  for attempt in 1 2 3 4; do
+    if bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"; then
+      state_write saved 1
+      return 0
+    fi
+    aios_warn "Sauvegarde du checkpoint échouée (tentative $attempt/4) — nouvelle tentative."
+    sleep 20
+  done
   return 1
 }
 
@@ -318,7 +323,7 @@ overlap)
   duration="$AIOS_OVERLAP_SECONDS"
   [[ "${TEST_RELAY:-false}" == true ]] && duration=60 && aios_log "Mode test : chevauchement ramené à ${duration}s."
   aios_log "CHEVAUCHEMENT : sauvegarde à chaud du checkpoint, puis service continu $((duration / 60)) min pendant que le successeur restaure."
-  save_checkpoint || aios_die "Sauvegarde du checkpoint impossible : le successeur ne pourra pas démarrer."
+  save_checkpoint || aios_warn "Checkpoint non publié : le service continue sans interruption (le watchdog relancera la chaîne si le successeur manque)."
   monitor_loop "$duration" "chevauchement"
   ;;
 
@@ -331,7 +336,7 @@ stop)
     sleep 2
   done
   [[ "$stopped" == 1 ]] || aios_warn "Arrêt non confirmé : on poursuit (le checkpoint est déjà publié)."
-  save_checkpoint || aios_die "Sauvegarde chiffrée impossible."
+  save_checkpoint || aios_warn "Sauvegarde chiffrée finale non publiée (le checkpoint précédent reste valide)."
   kill "$(file_pid bridge.pid)" 2>/dev/null || true
   kill "$(file_pid tunnel.pid)" 2>/dev/null || true
   kill "$(file_pid vncfwd.pid)" 2>/dev/null || true
