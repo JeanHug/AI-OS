@@ -165,6 +165,11 @@ aios_guest_ensure_desktop() {
     aios_guest_ssh "$1" 300 'curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o DPkg::Lock::Timeout=300 /tmp/chrome.deb' \
       || aios_warn "Chrome non installé dans l'invité."
   fi
+  # Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
+  if [ -f /usr/share/applications/google-chrome.desktop ]; then
+    aios_guest_ssh "$1" 20 'd=$(xdg-user-dir DESKTOP 2>/dev/null || echo /home/aios/Desktop); mkdir -p "$d"; cp /usr/share/applications/google-chrome.desktop "$d/" && chmod +x "$d/google-chrome.desktop"' \
+      || aios_warn "Raccourci bureau Chrome non posé."
+  fi
 }
 
 # Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
