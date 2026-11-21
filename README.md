@@ -35,18 +35,23 @@ Le flux est du **noVNC classique** (ses clics natifs, son menu) habillé par une
 surcouche légère (`scripts/aios-overlay.js`, intégrée dans la page) :
 
 - **Bouton plein écran** flottant (grand, déplaçable, position mémorisée).
-- **Appui long sur le bouton → menu d'outils** : sept fonctions, **3 icônes
-  max** dans une fine barre horizontale qui remplace le bouton :
+- **Appui long sur le bouton → menu d'outils** : six fonctions, **3 icônes
+  max** dans une fine barre horizontale compacte qui remplace le bouton :
 
   | Outil | Type | Effet |
   |---|---|---|
   | ⛶ Plein écran | bascule | entre/sort du plein écran ; le bureau se recalcède sur la nouvelle taille |
   | ⌨ Clavier au tap | mode | chaque tap sur l'écran déploie le clavier (le clavier natif de noVNC sert à la frappe) |
-  | ↕ Défiler | mode | le défilement du doigt devient la **molette du PC**, souris positionnée au départ du geste ; désactivé = mode sélectionner (comportement normal) |
   | 🗐 Copier | action | Ctrl+C dans la VM |
-  | 🗐 Coller | action | Ctrl+v dans la VM |
+  | 🗐 Coller | action | Ctrl+V dans la VM |
   | ⬇ Presse-papier → VM | action | envoie le presse-papier de l'appareil dans la VM |
   | ⬆ VM → presse-papier | action | copie le presse-papier de la VM sur l'appareil |
+
+- **Défilement par fin curseur vertical** (bas de l'écran, côté droit) : on
+  l'attrape et on le décale — vers le haut pour descendre, vers le bas pour
+  monter — la vitesse est **exponentielle** selon l'écart au centre ; lâché, il
+  revient au milieu. La molette agit à la position du **dernier clic**. Aucun
+  geste n'est intercepté : les clics restent natifs.
 
 - **Adaptation automatique du bureau** : la VM passe au format exact de la
   zone visible (rotation, plein écran, appareil) ; **la reconnexion est
