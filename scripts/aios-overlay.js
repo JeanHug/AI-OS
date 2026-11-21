@@ -576,6 +576,7 @@
   var resizeAttempts = 0, resizeBusy = false;
 
   function adaptScreen() {
+    if (location.search.indexOf('aiostest=1') >= 0) return; // banc de test : jamais de recalage
     lastW = window.innerWidth;
     if (!sig || resizeBusy || resizeAttempts >= 6) return;
     resizeBusy = true;
