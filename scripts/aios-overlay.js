@@ -2,13 +2,14 @@
  * aios-overlay.js — surcouche AI OS posée sur l'interface noVNC classique.
  *
  * Ajoute, SANS rien modifier de noVNC (ni ses clics, ni son panneau) :
- *   - le petit bouton flottant plein écran (noir, glyphe blanc centré, déplaçable) ;
- *   - l'adaptation du bureau à la zone VISIBLE de l'appareil (largeur), qui ne
- *     se déclenche jamais à cause du clavier ;
+ *   - le bouton flottant plein écran (grand, déplaçable) ; APPUI LONG = menu
+ *     d'outils : on choisit jusqu'à 3 icônes qui forment alors une fine barre
+ *     horizontale (remplaçant le bouton) ;
+ *   - les outils : plein écran, clavier au tap (mode), défiler à la molette
+ *     (mode), copier, coller, presse-papier appareil → VM, VM → appareil ;
+ *   - l'adaptation du bureau à la zone VISIBLE (plein écran compris), avec
+ *     reconnexion automatique de noVNC ;
  *   - l'écran qui ne s'éteint pas, une aide brève au premier lancement.
- *
- * Le clavier est celui de noVNC (son bouton « Clavier ») — aucun système
- * d'ouverture automatique n'est superposé.
  *
  * Le jeton de bureau est lu dans l'URL de la page, ou à défaut dans le
  * localStorage / cookie lisible / nom de fenêtre (posés par mobile.html).
@@ -46,7 +47,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // Styles (le bouton, lui, porte ses styles EN LIGNE : incontestables)
+  // Styles
   // -------------------------------------------------------------------------
   var css = [
     '#aios-pill{position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:2000;',
@@ -54,7 +55,19 @@
     'font-size:12.5px;font-family:system-ui,sans-serif;color:#eee;opacity:0;transition:opacity .35s;',
     'pointer-events:none;white-space:nowrap}',
     '#aios-pill.aios-show{opacity:1}',
-    '#aios-tuto{position:fixed;inset:0;z-index:2200;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px}',
+    '#aios-bar{position:fixed;z-index:2100;display:flex;gap:4px;padding:4px;border-radius:12px;',
+    'background:rgba(0,0,0,.72);border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);',
+    'right:10px;top:38%;touch-action:none}',
+    '#aios-bar button{width:34px;height:34px;padding:0;margin:0;border:0;border-radius:8px;background:transparent;',
+    'display:flex;align-items:center;justify-content:center;cursor:pointer}',
+    '#aios-bar button.aios-on{background:#2b5fc7}',
+    '#aios-menu{position:fixed;z-index:2200;display:none;background:rgba(16,16,16,.96);border:1px solid rgba(255,255,255,.22);',
+    'border-radius:14px;padding:10px;max-width:236px;flex-wrap:wrap;gap:6px;justify-content:center}',
+    '#aios-menu.aios-show{display:flex}',
+    '#aios-menu button{width:44px;height:44px;border-radius:10px;background:#232323;border:1.5px solid rgba(255,255,255,.14);',
+    'display:flex;align-items:center;justify-content:center;cursor:pointer}',
+    '#aios-menu button.aios-sel{background:#2b5fc7;border-color:#7aa5f0}',
+    '#aios-tuto{position:fixed;inset:0;z-index:2300;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px}',
     '#aios-tuto.aios-show{display:grid}',
     '#aios-tuto .card{background:#161616;border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:22px;max-width:400px;',
     'font-family:system-ui,sans-serif;color:#eee}',
@@ -72,26 +85,63 @@
     d.innerHTML = html.trim();
     return d.firstChild;
   }
+  function svg(paths, size) {
+    return '<svg viewBox="0 0 24 24" width="' + (size || 20) + '" height="' + (size || 20) +
+      '" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">' +
+      paths + '</svg>';
+  }
+
+  // -------------------------------------------------------------------------
+  // La boîte à outils : 7 fonctions, 3 sélectionnables dans la barre
+  // -------------------------------------------------------------------------
+  var TOOLS = [
+    { id: 'fs', label: 'Plein écran', mode: true,
+      icon: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>' },
+    { id: 'kb', label: 'Clavier au tap', mode: true,
+      icon: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/>' },
+    { id: 'scroll', label: 'Défiler (molette)', mode: true,
+      icon: '<path d="M8 5l4-3 4 3M8 19l4 3 4-3M12 2v20"/>' },
+    { id: 'copy', label: 'Copier', mode: false,
+      icon: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>' },
+    { id: 'paste', label: 'Coller', mode: false,
+      icon: '<path d="M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h6"/>' },
+    { id: 'clip2vm', label: 'Presse-papier vers la VM', mode: false,
+      icon: '<path d="M12 3v10M8 9l4 4 4-4M4 17h16"/>' },
+    { id: 'clip2dev', label: 'Presse-papier vers l’appareil', mode: false,
+      icon: '<path d="M12 21V11M8 15l4-4 4 4M4 7h16"/>' },
+  ];
+
+  function loadSel() {
+    try {
+      var v = JSON.parse(localStorage.getItem('aios.bar') || '[]');
+      return Array.isArray(v) ? v.filter(function (id) {
+        return TOOLS.some(function (t) { return t.id === id; });
+      }).slice(0, 3) : [];
+    } catch (e) { return []; }
+  }
+  function loadMode(id) {
+    try { return localStorage.getItem('aios.mode.' + id) === '1'; } catch (e) { return false; }
+  }
+  function saveMode(id, on) {
+    try { localStorage.setItem('aios.mode.' + id, on ? '1' : '0'); } catch (e) {}
+  }
+
+  var selected = loadSel();
+  var modes = { fs: false, kb: loadMode('kb'), scroll: loadMode('scroll') };
 
   var pill = el('<div id="aios-pill"></div>');
-  var fsBtn = el(
-    '<button id="aios-fs" aria-label="Plein écran" style="position:fixed;z-index:2100;' +
-    'width:26px;height:26px;min-width:26px;max-width:26px;padding:0;margin:0;border-radius:50%;' +
-    'background:#000;border:1.5px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
-    'display:flex;align-items:center;justify-content:center;overflow:hidden;box-sizing:border-box;' +
-    'cursor:pointer;opacity:.65;right:10px;top:38%;line-height:0">' +
-    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" style="display:block">' +
-    '<path id="aios-fsicon" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>'
-  );
+  var bar = el('<div id="aios-bar"></div>');
+  var menu = el('<div id="aios-menu"></div>');
   var tuto = el(
     '<div id="aios-tuto"><div class="card"><h2>Piloter le bureau au doigt</h2><ul>' +
     '<li>Tapez pour cliquer, glissez pour déplacer — noVNC gère les clics nativement.</li>' +
-    '<li>Pour écrire, utilisez le bouton « Clavier » du menu de noVNC.</li>' +
-    '<li>Le bureau épouse la largeur de votre écran ; le petit bouton rond passe en plein écran.</li>' +
+    '<li>Appui LONG sur le bouton : le menu d’outils (choisissez-en jusqu’à 3, ils forment une barre).</li>' +
+    '<li>Le bureau épouse votre écran, plein écran compris ; la reconnexion est automatique.</li>' +
     '</ul><button id="aios-tutook">Compris</button></div></div>'
   );
   document.body.appendChild(pill);
-  document.body.appendChild(fsBtn);
+  document.body.appendChild(bar);
+  document.body.appendChild(menu);
   document.body.appendChild(tuto);
 
   function say(msg, ms) {
@@ -103,9 +153,272 @@
   function buzz(m) { try { navigator.vibrate && navigator.vibrate(m); } catch (e) {} }
 
   // -------------------------------------------------------------------------
-  // Adaptation à la zone VISIBLE (largeur) — déclenchée uniquement par un
-  // changement d'affichage (chargement, rotation, plein écran), jamais par
-  // l'ouverture du clavier.
+  // Actions outils
+  // -------------------------------------------------------------------------
+  function toggleFs() {
+    buzz(12);
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(function () {});
+    } else {
+      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(function () {});
+    }
+  }
+  function openKb() {
+    var t = document.getElementById('noVNC_keyboardinput');
+    try {
+      if (t) {
+        if (document.activeElement === t) t.blur();
+        t.focus({ preventScroll: true });
+      }
+    } catch (e) {}
+  }
+  function apiPost(path, body) {
+    return fetch(apiUrl(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) { return r.json(); });
+  }
+  function doCopy() {
+    apiPost('/api/desktop/keys', { key: 'ctrl+c' }).then(function () { say('Copié dans la VM'); buzz(8); });
+  }
+  function doPaste() {
+    apiPost('/api/desktop/keys', { key: 'ctrl+v' }).then(function () { say('Collé dans la VM'); buzz(8); });
+  }
+  function doClip2vm() {
+    try {
+      navigator.clipboard.readText().then(function (t) {
+        return apiPost('/api/desktop/clipboard', { text: t || '' });
+      }).then(function () {
+        say('Presse-papier envoyé dans la VM'); buzz(8);
+      }).catch(function () { say('Lecture du presse-papier refusée'); });
+    } catch (e) { say('Lecture du presse-papier refusée'); }
+  }
+  function doClip2dev() {
+    fetch(apiUrl('/api/desktop/clipboard'), { method: 'GET' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        return navigator.clipboard.writeText((d && d.text) || '').then(function () {
+          say('Presse-papier copié sur l’appareil'); buzz(8);
+        });
+      })
+      .catch(function () { say('Écriture du presse-papier refusée'); }
+      );
+  }
+  function runTool(id) {
+    if (id === 'fs') { toggleFs(); return; }
+    if (id === 'kb') {
+      modes.kb = !modes.kb; saveMode('kb', modes.kb);
+      say(modes.kb ? 'Clavier au tap : activé' : 'Clavier au tap : désactivé');
+      renderBar(); buzz(8); return;
+    }
+    if (id === 'scroll') {
+      modes.scroll = !modes.scroll; saveMode('scroll', modes.scroll);
+      say(modes.scroll ? 'Mode défiler : activé' : 'Mode sélectionner : activé');
+      renderBar(); buzz(8); return;
+    }
+    if (id === 'copy') { doCopy(); return; }
+    if (id === 'paste') { doPaste(); return; }
+    if (id === 'clip2vm') { doClip2vm(); return; }
+    if (id === 'clip2dev') { doClip2dev(); return; }
+  }
+
+  // -------------------------------------------------------------------------
+  // Contrôle flottant : bouton rond (rien de sélectionné) OU fine barre
+  // -------------------------------------------------------------------------
+  var CTRL_STYLE = 'position:fixed;z-index:2100;right:10px;top:38%;touch-action:none;';
+
+  function renderBar() {
+    bar.innerHTML = '';
+    if (selected.length === 0) {
+      // Bouton rond : plus grand, glyphe centré — appui long = menu.
+      bar.setAttribute('style', CTRL_STYLE +
+        'width:42px;height:42px;min-width:42px;min-height:42px;padding:0;margin:0;border-radius:50%;' +
+        'background:#000;border:1.5px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
+        'display:flex;align-items:center;justify-content:center;box-sizing:border-box;opacity:.72;');
+      bar.innerHTML = svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>', 21);
+    } else {
+      // Fine barre horizontale des outils choisis (3 max).
+      bar.setAttribute('style', CTRL_STYLE +
+        'display:flex;gap:4px;padding:4px;border-radius:12px;background:rgba(0,0,0,.72);' +
+        'border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);opacity:.9;');
+      selected.forEach(function (id) {
+        var t = TOOLS.filter(function (x) { return x.id === id; })[0];
+        if (!t) return;
+        var b = document.createElement('button');
+        b.setAttribute('data-id', id);
+        b.setAttribute('aria-label', t.label);
+        if (t.mode && modes[id]) b.classList.add('aios-on');
+        b.innerHTML = svg(t.icon, 20);
+        bar.appendChild(b);
+      });
+    }
+  }
+
+  // Long-press + clic + déplacement du contrôle.
+  var press = null, moved = false;
+  bar.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+    var r = bar.getBoundingClientRect();
+    moved = false;
+    press = {
+      x0: e.clientX, y0: e.clientY, x: r.left, y: r.top,
+      onIcon: !!(e.target.closest && e.target.closest('button[data-id]')),
+      iconId: (e.target.closest && e.target.closest('button[data-id]')) ?
+        e.target.closest('button[data-id]').getAttribute('data-id') : null,
+    };
+    clearTimeout(press.lp);
+    press.lp = setTimeout(function () {
+      if (press && !moved) {
+        press.longpressed = true;
+        openMenu();
+        buzz(14);
+      }
+    }, 520);
+  });
+  bar.addEventListener('pointermove', function (e) {
+    if (!press) return;
+    var dx = e.clientX - press.x0, dy = e.clientY - press.y0;
+    if (!moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
+    moved = true;
+    clearTimeout(press.lp);
+    bar.style.left = Math.max(4, Math.min(window.innerWidth - 44, press.x + dx)) + 'px';
+    bar.style.top = Math.max(4, Math.min(window.innerHeight - 44, press.y + dy)) + 'px';
+    bar.style.right = 'auto';
+  });
+  bar.addEventListener('pointerup', function () {
+    if (!press) return;
+    clearTimeout(press.lp);
+    var lp = press.longpressed, icon = press.iconId;
+    press = null;
+    if (lp) return;
+    if (moved) {
+      var r = bar.getBoundingClientRect();
+      try { localStorage.setItem('aios.fspos', JSON.stringify({ x: r.left, y: r.top })); } catch (e) {}
+      return;
+    }
+    if (icon) { runTool(icon); return; }
+    if (selected.length === 0) { toggleFs(); return; }
+    openMenu();
+  });
+
+  // Position mémorisée.
+  try {
+    var p = JSON.parse(localStorage.getItem('aios.fspos') || 'null');
+    if (p && isFinite(p.x) && isFinite(p.y)) {
+      bar.style.left = p.x + 'px';
+      bar.style.top = p.y + 'px';
+      bar.style.right = 'auto';
+    }
+  } catch (e) {}
+
+  // -------------------------------------------------------------------------
+  // Menu (appui long) : choisir / retirer des outils, 3 max
+  // -------------------------------------------------------------------------
+  function openMenu() {
+    renderMenu();
+    var r = bar.getBoundingClientRect();
+    menu.classList.add('aios-show');
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.left + r.width / 2 - mw / 2)) + 'px';
+    menu.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.top + r.height + 10)) + 'px';
+  }
+  function renderMenu() {
+    menu.innerHTML = '';
+    TOOLS.forEach(function (t) {
+      var b = document.createElement('button');
+      b.setAttribute('data-id', t.id);
+      b.setAttribute('aria-label', t.label);
+      if (selected.indexOf(t.id) >= 0) b.classList.add('aios-sel');
+      b.innerHTML = svg(t.icon, 22);
+      menu.appendChild(b);
+    });
+  }
+  menu.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]');
+    if (!b) return;
+    var id = b.getAttribute('data-id');
+    var i = selected.indexOf(id);
+    if (i >= 0) { selected.splice(i, 1); buzz(8); }
+    else if (selected.length < 3) { selected.push(id); buzz(12); }
+    else { say('3 icônes maximum'); return; }
+    try { localStorage.setItem('aios.bar', JSON.stringify(selected)); } catch (e) {}
+    renderMenu();
+    renderBar();
+    if (selected.length === 0) menu.classList.remove('aios-show');
+  });
+  window.addEventListener('pointerdown', function (e) {
+    if (menu.classList.contains('aios-show') && !menu.contains(e.target) &&
+        !(bar.contains && bar.contains(e.target))) {
+      menu.classList.remove('aios-show');
+    }
+  }, true);
+
+  renderBar();
+
+  // -------------------------------------------------------------------------
+  // Mode clavier au tap : chaque tap sur l'écran déploie le clavier
+  // (après le clic — jamais pendant) ; mode défiler : le défilement du doigt
+  // devient la molette du PC, souris positionnée au départ du geste.
+  // -------------------------------------------------------------------------
+  var tapInfo = null, scrollInfo = null;
+  function onControl(target) {
+    return (bar.contains && bar.contains(target)) || (menu.contains && menu.contains(target));
+  }
+  window.addEventListener('touchstart', function (e) {
+    if (e.touches && e.touches.length >= 3) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFs();
+      return;
+    }
+    if (!e.touches || e.touches.length !== 1 || onControl(e.target)) { tapInfo = null; scrollInfo = null; return; }
+    var t = e.touches[0];
+    tapInfo = { x: t.clientX, y: t.clientY, moved: false };
+    if (modes.scroll) {
+      scrollInfo = { x0: t.clientX, y0: t.clientY, lastY: t.clientY, acc: 0, moved: false };
+    }
+  }, { capture: true, passive: false });
+  window.addEventListener('touchmove', function (e) {
+    if (tapInfo) tapInfo.moved = true;
+    if (!scrollInfo || !e.touches || e.touches.length !== 1) return;
+    var t = e.touches[0];
+    var dy = t.clientY - scrollInfo.lastY;
+    if (!scrollInfo.moved && Math.abs(t.clientY - scrollInfo.y0) < 8) return;
+    if (!scrollInfo.moved) {
+      scrollInfo.moved = true;
+      // Souris VM positionnée à la position de DÉPART du défilement.
+      apiPost('/api/desktop/mouse', { action: 'move', x: Math.round(scrollInfo.x0), y: Math.round(scrollInfo.y0) });
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    scrollInfo.acc += dy;
+    while (Math.abs(scrollInfo.acc) >= 22) {
+      var dir = scrollInfo.acc < 0 ? 'up' : 'down';
+      scrollInfo.acc += (dir === 'up' ? 22 : -22);
+      apiPost('/api/desktop/mouse', {
+        action: 'scroll', direction: dir,
+        x: Math.round(scrollInfo.x0), y: Math.round(scrollInfo.y0), amount: 1,
+      });
+    }
+    scrollInfo.lastY = t.clientY;
+  }, { capture: true, passive: false });
+  window.addEventListener('touchend', function () {
+    var tap = tapInfo;
+    tapInfo = null;
+    if (scrollInfo && scrollInfo.moved) { scrollInfo = null; return; }
+    scrollInfo = null;
+    if (tap && !tap.moved && modes.kb) {
+      // Ouverture APRÈS le clic (jamais pendant : ça l'annulerait).
+      setTimeout(openKb, 90);
+    }
+  }, { capture: true, passive: true });
+
+  // -------------------------------------------------------------------------
+  // Adaptation à la zone VISIBLE (largeur ET hauteur) : plein écran, rotation…
+  // Le clavier du téléphone (hauteur seule) ne déclenche jamais ceci.
   // -------------------------------------------------------------------------
   var lastW = 0;
   function targetGeom() {
@@ -120,8 +433,8 @@
   var resizeAttempts = 0, resizeBusy = false;
 
   // Après un recalage, la connexion VNC retombe : on relance la connexion de
-  // noVNC (son bouton n'est cliquable que s'il est déconnecté) tant qu'il
-  // faut. La page ne se recharge PAS : le plein écran est conservé.
+  // noVNC (son bouton n'est cliquable que s'il est déconnecté) — la page ne se
+  // recharge pas : le plein écran est conservé.
   function healConnect(deadlineMs) {
     var btn = document.getElementById('noVNC_connect_button');
     if (btn && btn.offsetParent !== null && !btn.disabled) {
@@ -139,20 +452,12 @@
       .then(function (g) {
         if (!g || !g.ok) { resizeBusy = false; return; }
         var t = targetGeom();
-        // Format réel de la zone visible : largeur ET hauteur. Le plein écran
-        // recalcé donc le bureau sur la nouvelle taille (et rétablit en le
-        // quittant). Seuls les vrais changements d'affichage appellent ceci :
-        // le clavier du téléphone (hauteur seule) n'y touche jamais.
         var widthBad = Math.abs(g.width - t.w) > Math.max(24, t.w * 0.025);
         var heightBad = Math.abs(g.height - t.h) > Math.max(24, t.h * 0.025);
         if (!widthBad && !heightBad) { resizeAttempts = 0; resizeBusy = false; return; }
         resizeAttempts++;
         say('Adaptation de l’écran à votre appareil…', 6000);
-        return fetch(apiUrl('/api/desktop/resize'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ width: t.w, height: t.h }),
-        }).then(function () {
+        return apiPost('/api/desktop/resize', { width: t.w, height: t.h }).then(function () {
           resizeBusy = false;
           healConnect(Date.now() + 30000);
         }).catch(function () { resizeBusy = false; });
@@ -160,74 +465,12 @@
       .catch(function () { resizeBusy = false; });
   }
   window.addEventListener('resize', function () {
-    // Un changement de LARGEUR = rotation ou nouvel affichage → on adapte.
-    // Un changement de hauteur seul = clavier → on n'y touche pas.
     if (window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
   });
   window.addEventListener('orientationchange', function () { setTimeout(adaptScreen, 450); });
-  // Le plein écran RECALE le bureau sur la nouvelle taille (et rétablit l'ancien
-  // format en le quittant) ; la reconnexion est ensuite automatique.
   document.addEventListener('fullscreenchange', function () { setTimeout(adaptScreen, 350); });
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden && window.innerWidth !== lastW) setTimeout(adaptScreen, 400);
-  });
-
-  // -------------------------------------------------------------------------
-  // Bouton plein écran flottant (26 px, styles en ligne, glyphe centré)
-  // -------------------------------------------------------------------------
-  var ICON_FS = 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5';
-  var ICON_RESTORE = 'M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5';
-  try {
-    var p = JSON.parse(localStorage.getItem('aios.fspos') || 'null');
-    if (p && isFinite(p.x) && isFinite(p.y)) {
-      fsBtn.style.left = p.x + 'px';
-      fsBtn.style.top = p.y + 'px';
-      fsBtn.style.right = 'auto';
-    }
-  } catch (e) {}
-
-  var fsDrag = null;
-  fsBtn.addEventListener('pointerdown', function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    try { fsBtn.setPointerCapture(e.pointerId); } catch (err) {}
-    var r = fsBtn.getBoundingClientRect();
-    fsDrag = { x0: e.clientX, y0: e.clientY, x: r.left, y: r.top, moved: false };
-  });
-  fsBtn.addEventListener('pointermove', function (e) {
-    if (!fsDrag) return;
-    var dx = e.clientX - fsDrag.x0, dy = e.clientY - fsDrag.y0;
-    if (!fsDrag.moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
-    fsDrag.moved = true;
-    fsBtn.style.left = Math.max(4, Math.min(window.innerWidth - 30, fsDrag.x + dx)) + 'px';
-    fsBtn.style.top = Math.max(4, Math.min(window.innerHeight - 30, fsDrag.y + dy)) + 'px';
-    fsBtn.style.right = 'auto';
-    fsBtn.style.opacity = '1';
-  });
-  fsBtn.addEventListener('pointerup', function () {
-    if (!fsDrag) return;
-    var moved = fsDrag.moved;
-    fsDrag = null;
-    fsBtn.style.opacity = '.65';
-    if (moved) {
-      var r = fsBtn.getBoundingClientRect();
-      try { localStorage.setItem('aios.fspos', JSON.stringify({ x: r.left, y: r.top })); } catch (e) {}
-    } else {
-      toggleFs();
-    }
-  });
-
-  function toggleFs() {
-    buzz(12);
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(function () {});
-    } else {
-      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(function () {});
-    }
-  }
-  document.addEventListener('fullscreenchange', function () {
-    document.getElementById('aios-fsicon').setAttribute('d', document.fullscreenElement ? ICON_RESTORE : ICON_FS);
-    wake();
   });
 
   // -------------------------------------------------------------------------

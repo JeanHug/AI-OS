@@ -1,184 +1,121 @@
-# AI OS
+# AI OS — un bureau Linux, 24 h/24, dans le navigateur
 
-Un système d'exploitation atteignable depuis une seule URL : une page web qui
-devient un bureau complet, construite et étendue par un agent IA au langage
-naturel. Le navigateur porte l'interface ; une VM QEMU (Ubuntu 26.10, noyau
-7.3.1) porte la puissance de calcul, les logiciels et le stockage.
+AI OS exécute un **bureau Linux complet (XFCE) dans une VM QEMU**, accessible
+depuis n'importe quel navigateur — ordinateur ou téléphone — via une URL
+unique, sans installation. Le bureau tourne **en continu** : la chaîne
+d'automatisation le fait vivre par cycles successifs, sans trou de service.
+
+---
 
 ## Architecture
 
-```
-Navigateur ──► Cloudflare Worker « ai-os » ──► tunnel durable « ai-os » ──► pont d'interaction
-   │            (API : auth, relais)              (cloudflared nommé)          │  (runner)
-   │                  │                                  ▲                     │
-   │                  │             Worker « ai-os-desk » ┘ (liaison VPC)      ▼
-   │                  │             = le lien interactif fixe        VM QEMU (Ubuntu 26.10 / 7.3.1)
-   │                                                                     XFCE sur Xvfb :99, utilisateur aios
-   │
-   └─ état persistant ◄── checkpoints chiffrés (GPG AES256) ── JeanHug/ai-os-data-private
-```
-
-Le tunnel est **durable** : un tunnel nommé Cloudflare créé via l'API
-(`CLOUDFLARE_TOKEN`), dont le connecteur se relance avec un jeton dédié. Son
-URL publique (`ai-os-desk.hugdu77777.workers.dev`, reliée au tunnel par liaison
-VPC) est **fixe** — plus aucune URL `trycloudflare` éphémère, plus aucune
-publication d'URL à découvrir.
-
-Trois familles d'applications pourront cohabiter : pures pages web, pages avec
-dos sur la VM (API d'interaction ou services locaux), et fenêtres diffusant un
-bureau distant.
-
-## Dépôt
-
-```
-config/aios.conf                  valeurs communes (noyau, image, timings, instance-id)
-scripts/lib-common.sh             constantes, KVM, SSH, journalisation
-scripts/lib-cloudinit.sh          génération du seed cloud-init (minime, rapide)
-scripts/qemu-cycle.sh             le cycle en phases : restore, boot, install-desktop,
-                                  bridge, tunnel, publish, produce, dispatch, overlap, stop
-scripts/qemu-live.sh              session de diagnostic jetable (tunnels-linux-live.json)
-scripts/qemu-validation.sh        validation OS + noyau (KVM obligatoire)
-scripts/aios-data.sh              sauvegarde / restauration chiffrée
-scripts/qemu-interaction-bridge.cjs  pont d'interaction (authentifié, port 3001)
-scripts/qemu-publish-tunnel.cjs   publication du statut du tunnel (branche tunnel-url)
-scripts/deploy-cloudflare-worker.cjs déploiement des Workers « ai-os » et « ai-os-desk »
-cloudflare-worker/worker.js       passerelle publique (auth, relais, documentation)
-cloudflare-worker/desk-worker.js  lien interactif (transparence HTTP/WebSocket vers le pont)
-```
-
-## Workflows (tous `workflow_dispatch`)
-
-| Workflow | Rôle |
+| Pièce | Rôle |
 |---|---|
-| `AI OS QEMU - relais et sauvegarde` | production : le cycle complet, découpé en étapes visibles (ci-dessous) |
-| `AI OS QEMU - veille du relais` | filet 24/7 (toutes les 15 min) : relance un cycle si plus aucun n'est actif |
-| `AI OS QEMU - capture expérimentale` | diagnostic jetable, sans sauvegarde, publié sous `tunnels-linux-live.json` |
-| `AI OS QEMU - validation experimentale` | vérifie Ubuntu 26.10 + noyau 7.3.1 (KVM obligatoire, jamais de TCG) |
+| **Worker Cloudflare `ai-os`** | L'API publique (jetons, exécution, géométrie, presse-papier…). C'est la seule porte d'entrée applicative. |
+| **Tunnel Cloudflare durable « ai-os »** | Le lien interactif (nommé, avec token API — jamais de tunnel éphémère). |
+| **Worker `ai-os-desk`** | Proxy muet HTTP + WebSocket (noVNC) vers le pont, via une liaison VPC vers le tunnel. |
+| **Pont d'interaction** (`scripts/qemu-interaction-bridge.cjs`) | Sur la machine hôte : sert noVNC, relaie les commandes vers l'invité, vérifie les jetons. |
+| **VM QEMU (invité Ubuntu + XFCE)** | Le bureau lui-même : Xvfb, xfce4-session, x11vnc, websockify/noVNC, Chrome. |
+| **Workflows GitHub Actions** | `qemu-durable.yml` (le cycle de vie complet) + `qemu-watchdog.yml` (la veille, toutes les 15 min). |
 
-### Le cycle de production, étape par étape
+### Le cycle sans trou de service
+
+Chaque run `qemu-durable` : restaure le **checkpoint chiffré** (GPG AES256)
+du cycle précédent → démarre la VM → installe le bureau et les outils → pont +
+tunnel → **phase de production** (le service) → publie un nouveau checkpoint →
+**chevauchement** (l'ancien continue de servir pendant que le successeur
+restaure) → relance le workflow suivant. Une sauvegarde ratée n'interrompt
+**jamais** le service : elle est retentée toutes les 5 minutes.
+
+---
+
+## L'expérience bureau
+
+Le flux est du **noVNC classique** (ses clics natifs, son menu) habillé par une
+surcouche légère (`scripts/aios-overlay.js`, intégrée dans la page) :
+
+- **Bouton plein écran** flottant (grand, déplaçable, position mémorisée).
+- **Appui long sur le bouton → menu d'outils** : sept fonctions, **3 icônes
+  max** dans une fine barre horizontale qui remplace le bouton :
+
+  | Outil | Type | Effet |
+  |---|---|---|
+  | ⛶ Plein écran | bascule | entre/sort du plein écran ; le bureau se recalcède sur la nouvelle taille |
+  | ⌨ Clavier au tap | mode | chaque tap sur l'écran déploie le clavier (le clavier natif de noVNC sert à la frappe) |
+  | ↕ Défiler | mode | le défilement du doigt devient la **molette du PC**, souris positionnée au départ du geste ; désactivé = mode sélectionner (comportement normal) |
+  | 🗐 Copier | action | Ctrl+C dans la VM |
+  | 🗐 Coller | action | Ctrl+v dans la VM |
+  | ⬇ Presse-papier → VM | action | envoie le presse-papier de l'appareil dans la VM |
+  | ⬆ VM → presse-papier | action | copie le presse-papier de la VM sur l'appareil |
+
+- **Adaptation automatique du bureau** : la VM passe au format exact de la
+  zone visible (rotation, plein écran, appareil) ; **la reconnexion est
+  automatique** après recalage — la page ne se recharge jamais.
+- Wake Lock (l'écran ne s'éteint pas), tutoriel au premier lancement.
+
+---
+
+## Persistance
+
+- **Checkpoints chiffrés** publiés chaque cycle (et retentés toutes les 5 min
+  en cas de panne) : les comptes, le profil Chrome et les fichiers survivent
+  d'un cycle à l'autre.
+- **Fond d'écran blanc** : écrit systématiquement dans la configuration xfconf
+  (`xfce4-desktop.xml`) — plus jamais effacé par un redémarrage.
+- **Chrome** est relancé automatiquement après tout redémarrage d'affichage,
+  avec son profil (sessions et comptes reconnectés).
+- Le redémarrage d'affichage vérifie ses services (bannière RFB, HTTP) et tue
+  tout processus fantôme avant de relancer.
+
+---
+
+## API (Worker `ai-os`)
+
+Authentification : jeton de bureau signé (`?s=` HMAC-SHA256, expiration) ou
+mot de passe de l'app (en-tête `Bearer`, stocké en secret Worker). Aucun
+secret dans le dépôt ni dans les réponses.
+
+| Route | Méthode | Description |
+|---|---|---|
+| `/grant` | POST | Génère un lien de bureau signé (4 h par défaut) |
+| `/` | GET | Sans jeton → l'app ; avec `?s=` → redirection vers le bureau |
+| `/api/desktop/geom` | GET | Géométrie actuelle de l'affichage de la VM |
+| `/api/desktop/resize` | POST | Recalcule l'affichage X (Xvfb + XFCE + x11vnc + websockify) |
+| `/api/desktop/focus` | GET | Détection AT-SPI du champ texte actif (+ rectangle) |
+| `/api/desktop/keys` | POST | Envoie des touches (Ctrl+C/V…) à la VM |
+| `/api/desktop/mouse` | POST | Souris / molette (défilement) à la VM |
+| `/api/desktop/clipboard` | GET/POST | Lecture / écriture du presse-papier de la VM |
+
+---
+
+## Développement
 
 ```
-Restaurer le checkpoint chiffré (ou créer le disque)     ~5 min
-Démarrer la VM et attendre qu'elle soit prête            ~1-2 min
-Installer le bureau et les outils d'interaction          ~1-2 min (idempotent)
-Démarrer le pont d'interaction                           ~2 s
-Déployer le tunnel cloudflared                           ~20 s
-Publier l'URL et vérifier l'API d'interaction            ~5 s
-Phase de production (période d'utilisation)               5 h 00   ← le service est en ligne
-Créer et lancer le workflow suivant                      ~2 s
-Chevauchement — sauvegarde à chaud puis service continu  30 min   ← le successeur restaure
-Auto-arrêt propre de l'invité                            ~2 min
+app/                  Application web (l'app, servie par Pages + le worker)
+cloudflare-worker/
+  worker.js           L'API (ai-os)
+  desk-worker.js      Le proxy interactif muet (ai-os-desk)
+scripts/
+  aios-overlay.js     La surcouche bureau (bouton, barre d'outils, adaptation)
+  mobile.html         Point d'entrée mobile (jeton conservé, anti-cache)
+  qemu-interaction-bridge.cjs   Le pont (noVNC + API invité)
+  qemu-cycle.sh       Le cycle de vie (restore, boot, install, chevauchement…)
+  lib-common.sh       Installation invité (bureau, flux, Chrome, fond blanc)
+  deploy-cloudflare-worker.cjs  Déploiement des workers
+.github/workflows/
+  qemu-durable.yml    Le workflow du cycle (chaîne permanente)
+  qemu-watchdog.yml   La veille (redémarre la chaîne si elle s'arrête)
 ```
 
-Chaque ligne est une étape visible dans l'onglet Actions. Les durées de la
-production et du chevauchement se règlent dans `config/aios.conf`
-(`AIOS_PRODUCE_SECONDS`, `AIOS_OVERLAP_SECONDS`).
+Déploiement : `node scripts/deploy-cloudflare-worker.cjs` (les workers) et les
+workflows s'occupent du reste à chaque cycle. Les sauvegardes chiffrées vivent
+dans le dépôt privé `aios-data-private`.
 
-## Secrets
+## Sécurité
 
-| Secret GitHub | Usage |
-|---|---|
-| `GH_TOKEN` | API GitHub : checkpoint, publication du statut, déclenchement du relais |
-| `AIOS_BACKUP_KEY` | chiffrement GPG des checkpoints. **Irrécupérable s'il est perdu.** |
-| `AIOS_VM_SSH_KEY` | clé SSH de l'invité (la clé publique est ancrée dans le checkpoint) |
-| `VM_API_TOKEN` | jeton du pont d'interaction (≥ 32 caractères) |
-| `CLOUDFLARE_ID` / `CLOUDFLARE_TOKEN` | compte Cloudflare : tunnel durable nommé, jeton connecteur |
-
-Secrets du Worker `ai-os` : `PASS` (code d'accès actuel) et `VM_API_TOKEN`.
-Le Worker `ai-os-desk` (lien interactif) n'a aucun secret : il s'appuie sur la
-liaison VPC vers le tunnel durable, et l'authentification reste au pont.
-
-## Relais blue-green
-
-La production dure 5 h 00 ; le cycle suivant est alors **créé et lancé** comme
-nouveau run de workflow, avec l'identifiant du cycle courant en paramètre.
-Au **début du chevauchement** (30 min), le cycle courant publie son checkpoint
-en **sauvegarde à chaud** (l'invité reste vivant, `sync` avant la copie) : le
-successeur attend ce checkpoint, restaure, démarre et publie son tunnel
-**pendant que l'ancien continue de servir** — il n'y a aucun trou de service.
-Le cycle courant s'auto-arrête ensuite sans republier (personne ne
-consommerait cette génération).
-
-Un workflow de **veille** (toutes les 15 min) relance un cycle si plus aucun
-n'est actif : la chaîne se rétablit toute seule après n'importe quel plantage.
-
-Contraintes mesurées (run `42384041709`, checkpoint de 1,9 Go) :
-sauvegarde ≈ 5 min, restauration + démarrage ≈ 8 min ; les deux croissent
-linéairement avec la taille du disque. Le chevauchement de 30 min couvre la
-restauration du successeur avec marge. Jauge critique : entre 8 et 12 Go de
-disque, la marge fond — voir les options d'évolution (base dorée immuable +
-deltas par bitmap QEMU) dans la documentation de projet.
-
-Contraintes dures du runner GitHub (dépôt **public** : 4 vCPU, 16 Go RAM,
-**14 Go SSD**) : ne jamais rendre ce dépôt privé (2 vCPU / 8 Go), et surveiller
-l'espace disque — `aios-data.sh` refuse une sauvegarde sans 3,5 Go de marge.
-
-## Sauvegarde
-
-`qemu-img check` → `gzip -1` → `gpg --symmetric --cipher-algo AES256 --s2k-mode 3`
-→ fragments de 45 Mo → `SHA256SUMS` + `CHECKPOINT` + `CREATED_AT` → branche
-orpheline `snapshot` de `JeanHug/ai-os-data-private` (privé).
-La restauration vérifie le `CHECKPOINT` attendu **et** chaque somme SHA256
-avant déchiffrement. Génération unique : la branche est réécrite à chaque cycle.
-
-## Bureau interactif
-
-**`app/index.html`** est l'unique porte d'entrée, déployée à deux endroits :
-GitHub Pages (`jeanhug.github.io/AI-OS/app/`) et le Worker (`/app`).
-Page blanche, un seul champ : le code d'accès. Aucun mot de passe n'est écrit
-dans le code source — le code est vérifié par le Worker (`POST /grant`), qui
-répond par un jeton signé HMAC valable 4 h et renvoie vers le bureau.
-
-- `app/` → le code → redirection vers le lien interactif fixe **avec** le jeton
-  signé → bureau (noVNC à travers le tunnel durable).
-- Le lien interactif ouvert **sans** autorisation → redirection vers `app/`.
-- Le navigateur mémorise l'accès (cookie) : 4 h d'utilisation directe.
-- L'API d'interaction reste derrière le Worker `ai-os` (Bearer), jamais exposée
-  comme interface.
-
-Le code d'accès vit uniquement dans le secret `PASS` du Worker.
-
-## API d'interaction (pont, auth `Bearer VM_API_TOKEN`)
-
-| Route | Rôle |
-|---|---|
-| `GET /health` | état du pont |
-| `GET /api/linux/status` | noyau, Xvfb, XFCE, outils disponibles |
-| `GET /api/linux/system` | uname, OS, mémoire, disque |
-| `GET /api/linux/screenshot` | capture PNG de l'affichage |
-| `POST /api/linux/exec` | `{command, timeout_sec}` — shell dans la VM |
-| `POST /api/linux/mouse` | `{action: move\|click\|dblclick\|scroll, x, y, button, direction, amount}` |
-| `POST /api/linux/keyboard` | `{key: "ctrl+s"}` ou `{text: "…"}` |
-| `GET/POST /api/linux/clipboard` | lecture / écriture du presse-papier |
-| `GET /api/linux/files` · `files/read` · `POST files/write` · `DELETE files` | fichiers, strictement sous `/home/aios` |
-| `POST /api/linux/apps/launch` | `{app, args[]}` (noms validés par liste blanche) |
-| `GET /api/linux/processes` | top des processus |
-
-Toutes les routes existent aussi sous `/api/v1/*`. Le Worker `ai-os` les relaye
-après vérification du code d'accès ; chaque réponse porte `X-Linux-Daemon: 1`,
-ce qui permet au Worker de distinguer une erreur légitime d'un pont absent.
-
-Sécurité du pont : aucune interpolation shell côté runner (scripts invités
-envoyés par stdin, données en base64 strict), jeton comparé à temps constant,
-chemins de fichiers cantonnés au domicile invité.
-
-## Configuration et évolution
-
-Tout est dans `config/aios.conf` :
-
-- **Version du noyau** : modifier `AIOS_KERNEL_*` (une seule place).
-- **Ajouter des paquets à la VM** : les ajouter dans `aios_guest_packages`
-  (`scripts/lib-common.sh`) — l'étape « Installer le bureau et les outils » les
-  pose idempotemment au cycle suivant, sans rien réinstaller de déjà présent.
-- **Modèle de CPU** : `AIOS_QEMU_CPU` (défaut `host`). Un modèle nommé stable
-  est nécessaire le jour où les checkpoints seront restaurés sur des runners de
-  générations différentes — à valider d'abord avec le workflow de validation.
-
-## Pistes ouvertes
-
-1. Relais à coupure quasi nulle : base dorée immuable + deltas par bitmap QEMU
-   persistant (sauvegardes incrémentales sans arrêt de la VM).
-2. Authentification par jeton Firebase (remplacera le code à 4 chiffres,
-   décision prise pour plus tard).
-3. Le bureau web HTML (barre d'apps, apps installables, fenêtres, permissions)
-   et le moteur d'agence de l'agent IA — le cœur du projet.
+- Repo public : **aucun mot de passe, aucun token** nulle part dans le code.
+- Jetons de bureau signés (HMAC-SHA256, expiration) — jamais le secret en clair.
+- Tunnel durable nommé (token API Cloudflare en secret GitHub) — aucun lien
+  éphémère.
+- Le bureau n'est joignable qu'authentifié ; sans jeton, l'utilisateur est
+  renvoyé vers l'app.

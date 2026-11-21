@@ -182,6 +182,43 @@ export default {
         return J({ ok: true, focus, rect });
       }
 
+      if (url.pathname === "/api/desktop/keys" && request.method === "POST") {
+        let body = {};
+        try { body = JSON.parse(await request.text()); } catch (e) {}
+        const key = String(body.key || "");
+        if (!/^(ctrl\+[acvx])$/i.test(key)) return J({ ok: false, error: "Touches non permises" }, 400);
+        const r = await linuxExec(env, "export DISPLAY=:99\nxdotool key --delay 12 " + key.toLowerCase(), 15);
+        return J({ ok: !!(r && r.ok), sent: key });
+      }
+
+      if (url.pathname === "/api/desktop/mouse" && request.method === "POST") {
+        let body = {};
+        try { body = JSON.parse(await request.text()); } catch (e) {}
+        const x = Math.round(Number(body.x)), y = Math.round(Number(body.y));
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 3840 || y > 2400) {
+          return J({ ok: false, error: "Coordonnées invalides" }, 400);
+        }
+        const dir = body.direction === "up" ? 4 : 5;
+        const amount = Math.min(Math.max(Math.round(Number(body.amount) || 1), 1), 10);
+        const r = await linuxExec(env, `export DISPLAY=:99\nxdotool mousemove ${x} ${y}\nxdotool click --repeat ${amount} --delay 60 ${dir}`, 15);
+        return J({ ok: !!(r && r.ok), direction: dir === 4 ? "up" : "down", amount });
+      }
+
+      if (url.pathname === "/api/desktop/clipboard" && request.method === "GET") {
+        const r = await linuxExec(env, "export DISPLAY=:99\nxclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output 2>/dev/null || true", 15);
+        return J({ ok: true, text: String((r && r.stdout) || "") });
+      }
+
+      if (url.pathname === "/api/desktop/clipboard" && request.method === "POST") {
+        let body = {};
+        try { body = JSON.parse(await request.text()); } catch (e) {}
+        const text = String(body.text || "");
+        if (text.length > 1024 * 1024) return J({ ok: false, error: "Texte trop long" }, 400);
+        const b64 = btoa(unescape(encodeURIComponent(text)));
+        const r = await linuxExec(env, `printf %s '${b64}' | base64 -d | DISPLAY=:99 xclip -selection clipboard`, 15);
+        return J({ ok: !!(r && r.ok), bytes: text.length });
+      }
+
       if (url.pathname === "/api/desktop/resize" && request.method === "POST") {
         let body = {};
         try { body = JSON.parse(await request.text()); } catch (e) {}
