@@ -162,12 +162,22 @@ restore)
     aios_log "Attente du checkpoint du cycle $expected..."
     [[ "$expected" =~ ^[0-9]+$ ]] || aios_die "predecessor_run_id invalide"
     ready=0
-    for _ in $(seq 1 150); do
+    for _ in $(seq 1 60); do
       status=$(curl -sS --max-time 15 -o "$AIOS_WORK_DIR/check.json" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$AIOS_DATA_REPO/contents/CHECKPOINT?ref=$AIOS_DATA_BRANCH" || echo 000)
       if [[ "$status" == 200 ]] && EXPECTED="$expected" python3 -c 'import json,base64,os; d=json.load(open("check.json")); assert base64.b64decode(d["content"]).decode().strip()==os.environ["EXPECTED"]' 2>/dev/null; then ready=1; break; fi
+      run_status=$(curl -sS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY:?}/actions/runs/$expected" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)
+      if [[ "$run_status" == "completed" ]]; then
+        aios_warn "Le cycle $expected s'est terminé SANS publier son checkpoint : repli immédiat."
+        break
+      fi
       sleep 15
     done
-    [[ "$ready" == 1 ]] || aios_die "Checkpoint non publié : démarrage annulé pour protéger les données."
+    if [[ "$ready" != 1 ]]; then
+      aios_warn "Checkpoint du cycle $expected indisponible : repli sur la DERNIÈRE sauvegarde publiée (jamais d'interruption volontaire)."
+      expected=""
+    fi
+  fi
+  if [[ -n "$expected" ]]; then
     bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" restore "$AIOS_WORK_DIR/disk.img" "$expected"
     state_write fresh 0
   else
