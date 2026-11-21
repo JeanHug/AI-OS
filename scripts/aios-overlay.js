@@ -184,7 +184,13 @@
       document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(function () {});
     }
   }
+  function blurKb() {
+    var t = document.getElementById('noVNC_keyboardinput');
+    if (t && document.activeElement === t) { try { t.blur(); } catch (e) {} }
+  }
   function openKb() {
+    // Le mode « clavier au tap » est la SEULE autorisation d'ouvrir.
+    if (!modes.kb) return;
     var t = document.getElementById('noVNC_keyboardinput');
     if (!t) return;
     try {
@@ -192,6 +198,11 @@
       t.focus({ preventScroll: true });
     } catch (e) {}
   }
+  // Toute autre source de focus (noVNC, clic, code parasite) est neutralisée :
+  // sans le mode, le clavier ne s'ouvre JAMAIS.
+  document.addEventListener('focusin', function (e) {
+    if (e.target && e.target.id === 'noVNC_keyboardinput' && !modes.kb) blurKb();
+  }, true);
   function doCopy() {
     if (sendChord('c')) { buzz(8); say('Copié dans la VM'); return; }
     apiPost('/api/desktop/keys', { key: 'ctrl+c' }).then(function () { buzz(8); say('Copié dans la VM'); });
@@ -243,6 +254,7 @@
     if (id === 'fs') { toggleFs(); return; }
     if (id === 'kb') {
       modes.kb = !modes.kb; saveMode('kb', modes.kb);
+      if (!modes.kb) blurKb();
       say(modes.kb ? 'Clavier au tap : activé' : 'Clavier au tap : désactivé');
       renderBar(); buzz(8); return;
     }
@@ -326,12 +338,12 @@
     if (mTimer == null) {
       mTimer = setInterval(function () {
         mAcc += mPerTick;
-        if (Math.abs(mAcc) >= 1) {
+        while (Math.abs(mAcc) >= 1) {
           var n = Math.trunc(mAcc);
           mAcc -= n;
           wheelAt(n > 0 ? 1 : -1);
         }
-      }, 20);
+      }, 16);
     }
   }
   function motionStop() {
@@ -340,17 +352,17 @@
   }
   function motionInertia(v0) {
     motionStop();
-    mPerTick = v0 / 50;
+    mPerTick = v0 * 0.016;
     mTimer = setInterval(function () {
-      mPerTick *= 0.94;
-      if (Math.abs(mPerTick * 50) < 0.6) { motionStop(); return; }
+      mPerTick *= 0.945;
+      if (Math.abs(mPerTick / 0.016) < 0.8) { motionStop(); return; }
       mAcc += mPerTick;
-      if (Math.abs(mAcc) >= 1) {
+      while (Math.abs(mAcc) >= 1) {
         var n = Math.trunc(mAcc);
         mAcc -= n;
         wheelAt(n > 0 ? 1 : -1);
       }
-    }, 20);
+    }, 16);
   }
   knob.addEventListener('pointerdown', function (e) {
     e.preventDefault();
@@ -377,15 +389,15 @@
     if (!off) { motionSet(0); return; }
     var ratio = Math.min(1, Math.abs(off) / (half || 1));
     // Vitesse EXPONENTIELLE : très lent près du centre, très vite au bout.
-    var speed = 0.35 + 22 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
+    var speed = 0.5 + 55 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
     var dir = off < 0 ? 1 : -1; // vers le haut = défile vers le bas
-    motionSet(dir * speed / 50); // flux continu à 50 Hz
+    motionSet(dir * speed * 0.016); // flux continu à 62 Hz
   });
   function endScroll() {
     if (!sdrag) return;
     var half = sdrag.h / 2 - 13;
-    var v = -sdrag.vel / (half || 1) * 22; // vitesse du doigt prolongée (crans/s)
-    v = Math.max(-26, Math.min(26, v));
+    var v = -sdrag.vel / (half || 1) * 55; // vitesse du doigt prolongée (crans/s)
+    v = Math.max(-60, Math.min(60, v));
     sdrag = null;
     knob.style.transition = 'top .25s ease,background .2s';
     knob.style.top = 'calc(50% - 13px)';
