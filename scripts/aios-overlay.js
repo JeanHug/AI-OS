@@ -126,7 +126,7 @@
   pill.setAttribute('style', 'position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);' +
     'z-index:2000;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:6px 14px;' +
     'font-size:12.5px;font-family:system-ui,sans-serif;color:#eee;opacity:0;transition:opacity .35s;pointer-events:none;white-space:nowrap');
-  menu.setAttribute('style', 'position:fixed;z-index:2200;display:none;grid-template-columns:repeat(3,28px);gap:4px;' +
+  menu.setAttribute('style', 'position:fixed;z-index:2200;display:none;grid-template-columns:repeat(3,auto);justify-items:start;align-items:start;gap:4px;' +
     'background:rgba(16,16,16,.96);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:8px;box-sizing:border-box');
   tuto.setAttribute('style', 'position:fixed;inset:0;z-index:2300;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px');
   var tstyle = document.createElement('style');
@@ -135,7 +135,7 @@
     '#aios-tuto h2{margin:0 0 14px;font-size:18px;font-weight:600}' +
     '#aios-tuto ul{margin:0 0 18px;padding-left:20px}' +
     '#aios-tuto li{margin:8px 0;font-size:14px;line-height:1.45;color:#ddd}' +
-    '#aios-tuto button{width:100%;height:46px;border-radius:12px;border:0;background:#2b5fc7;color:#fff;font-size:15px}';
+    '#aios-tuto button{width:100%;min-width:0;height:46px;border-radius:12px;border:0;background:#2b5fc7;color:#fff;font-size:15px;-webkit-appearance:none;appearance:none}';
   document.head.appendChild(tstyle);
   document.body.appendChild(pill);
   document.body.appendChild(bar);
@@ -282,21 +282,33 @@
 
   var sdrag = null, stick = null, sacc = 0;
   function wheelAt(dir) {
-    var cx = lastCX == null ? (window.innerWidth || 400) / 2 : lastCX;
-    var cy = lastCY == null ? (window.innerHeight || 800) / 2 : lastCY;
-    var c = canvasEl(), r = rfbObj();
-    if (c && r) {
+    // Envoi DIRECT par le protocole VNC : la souris est placée à la position
+    // du DERNIER CLIC (calcul de coordonnées identique à noVNC), puis un cran
+    // de molette. Aucun événement DOM : rien ne peut se fourvoyer.
+    var r = rfbObj(), c = canvasEl();
+    var fx, fy;
+    if (c) {
+      var b = c.getBoundingClientRect();
+      var px = (lastCX == null ? b.left + b.width / 2 : lastCX);
+      var py = (lastCY == null ? b.top + b.height / 2 : lastCY);
+      var w = c.width || 1024, h = c.height || 768;
+      fx = Math.max(0, Math.min(w - 1, Math.round((px - b.left) * (w / (b.width || 1)))));
+      fy = Math.max(0, Math.min(h - 1, Math.round((py - b.top) * (h / (b.height || 1)))));
+    } else {
+      var p = toFb(lastCX == null ? window.innerWidth / 2 : lastCX,
+                   lastCY == null ? window.innerHeight / 2 : lastCY);
+      fx = p.x; fy = p.y;
+    }
+    if (r && typeof r.sendPointerEvent === 'function') {
       try {
-        c.dispatchEvent(new WheelEvent('wheel', {
-          bubbles: true, cancelable: true, view: window,
-          clientX: cx, clientY: cy, deltaY: dir * 50, deltaMode: 0, buttons: 0,
-        }));
+        var m = dir < 0 ? 8 : 16; // 8 = molette vers le haut, 16 = vers le bas
+        r.sendPointerEvent(fx, fy, m);
+        r.sendPointerEvent(fx, fy, 0);
         return;
       } catch (e) {}
     }
-    var p = toFb(cx, cy);
     apiPost('/api/desktop/mouse', {
-      action: 'scroll', direction: dir < 0 ? 'up' : 'down', x: p.x, y: p.y, amount: 1,
+      action: 'scroll', direction: dir < 0 ? 'up' : 'down', x: fx, y: fy, amount: 1,
     });
   }
   function scrollTick() {
@@ -362,7 +374,8 @@
         var b = document.createElement('button');
         b.setAttribute('data-id', id);
         b.setAttribute('aria-label', t.label);
-        b.setAttribute('style', 'width:26px;height:26px;padding:0;margin:0;border:0;border-radius:6px;flex:0 0 auto;' +
+        b.setAttribute('style', 'width:26px;height:26px;min-width:0;min-height:0;padding:0;margin:0;border:0;border-radius:6px;flex:0 0 auto;' +
+          '-webkit-appearance:none;appearance:none;font-size:0;line-height:0;' +
           'background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;box-sizing:border-box');
         if (t.mode && modes[id]) b.style.background = '#2b5fc7';
         b.innerHTML = svg(t.icon, 15);
@@ -444,7 +457,8 @@
       var b = document.createElement('button');
       b.setAttribute('data-id', t.id);
       b.setAttribute('aria-label', t.label);
-      b.setAttribute('style', 'width:28px;height:28px;padding:0;margin:0;flex:0 0 auto;box-sizing:border-box;' +
+      b.setAttribute('style', 'width:28px;height:28px;min-width:0;min-height:0;padding:0;margin:0;flex:0 0 auto;box-sizing:border-box;' +
+        '-webkit-appearance:none;appearance:none;font-size:0;line-height:0;' +
         'border-radius:8px;background:#232323;border:1.5px solid rgba(255,255,255,.14);' +
         'display:flex;align-items:center;justify-content:center;cursor:pointer');
       if (selected.indexOf(t.id) >= 0) {
