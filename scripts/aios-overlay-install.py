@@ -10,7 +10,9 @@ h = h.replace("<script src=aios-overlay.js></script>", "")
 h = h.replace(
     "</body>",
     "<!--aios-overlay-->\n<script type=\"module\">import UI from \"./app/ui.js\";"
-    " window.__aiosUI = UI;</script>\n<script>\n" + js + "\n</script>\n<!--/aios-overlay-->\n</body>",
+    " import { clientToElement } from \"./core/util/element.js\";"
+    " window.__aiosUI = UI; window.__aiosC2E = clientToElement;</script>\n<script>\n"
+    + js + "\n</script>\n<!--/aios-overlay-->\n</body>",
 )
 open(p, "w").write(h)
 print("surcouche injectée dans", p)

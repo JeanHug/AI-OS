@@ -277,39 +277,45 @@
 
   var lastCX = null, lastCY = null;
   window.addEventListener('click', function (e) {
-    lastCX = e.clientX; lastCY = e.clientY;
+    // « Position du dernier clic » = uniquement les clics sur l'écran distant.
+    var c = canvasEl();
+    if (c && (e.target === c || c.contains(e.target))) {
+      lastCX = e.clientX; lastCY = e.clientY;
+    }
   }, true);
 
   var sdrag = null, stick = null, sacc = 0;
   function wheelAt(dir) {
-    // Envoi DIRECT par le protocole VNC : la souris est placée à la position
-    // du DERNIER CLIC (calcul de coordonnées identique à noVNC), puis un cran
-    // de molette. Aucun événement DOM : rien ne peut se fourvoyer.
+    // EXACTEMENT « déplacer la souris vers un point + utiliser la molette » :
+    // même conversion que noVNC (clientToElement), même appel interne
+    // (_handleMouseButton) et même séquence de masque que le gestionnaire de
+    // molette natif : bmask | (1<<3) pour monter, | (1<<4) pour descendre,
+    // puis relâchement.
     var r = rfbObj(), c = canvasEl();
-    var fx, fy;
-    if (c) {
+    var pos = null;
+    if (c && window.__aiosC2E) {
       var b = c.getBoundingClientRect();
-      var px = (lastCX == null ? b.left + b.width / 2 : lastCX);
-      var py = (lastCY == null ? b.top + b.height / 2 : lastCY);
-      var w = c.width || 1024, h = c.height || 768;
-      fx = Math.max(0, Math.min(w - 1, Math.round((px - b.left) * (w / (b.width || 1)))));
-      fy = Math.max(0, Math.min(h - 1, Math.round((py - b.top) * (h / (b.height || 1)))));
-    } else {
-      var p = toFb(lastCX == null ? window.innerWidth / 2 : lastCX,
-                   lastCY == null ? window.innerHeight / 2 : lastCY);
-      fx = p.x; fy = p.y;
+      var cx = (lastCX == null ? b.left + b.width / 2 : lastCX);
+      var cy = (lastCY == null ? b.top + b.height / 2 : lastCY);
+      try { pos = window.__aiosC2E(cx, cy, c); } catch (e) {}
     }
-    if (r && typeof r.sendPointerEvent === 'function') {
+    if (r && pos && typeof r._handleMouseButton === 'function') {
       try {
-        var m = dir < 0 ? 8 : 16; // 8 = molette vers le haut, 16 = vers le bas
-        r.sendPointerEvent(fx, fy, m);
-        r.sendPointerEvent(fx, fy, 0);
+        var bm = r._mouseButtonMask || 0;
+        r._handleMouseButton(pos.x, pos.y, bm);       // souris déplacée au point
+        var m = dir < 0 ? 8 : 16;                     // 8 = molette haut, 16 = bas
+        r._handleMouseButton(pos.x, pos.y, bm | m);   // molette pressée
+        r._handleMouseButton(pos.x, pos.y, bm);       // molette relâchée
         return;
       } catch (e) {}
     }
-    apiPost('/api/desktop/mouse', {
-      action: 'scroll', direction: dir < 0 ? 'up' : 'down', x: fx, y: fy, amount: 1,
-    });
+    if (pos) {
+      // Repli : la molette par xdotool, au même point.
+      apiPost('/api/desktop/mouse', {
+        action: 'scroll', direction: dir < 0 ? 'up' : 'down',
+        x: Math.round(pos.x), y: Math.round(pos.y), amount: 1,
+      });
+    }
   }
   function scrollTick() {
     if (!sdrag || !sdrag.off) { sacc = 0; return; }
@@ -620,6 +626,30 @@
       tuto.classList.remove('aios-show');
     });
   } catch (e) {}
+
+  // ---- Banc de test autonome (?aiostest=1) : prouve chaque couche ----
+  function runSelfTest() {
+    var r = rfbObj(), c = canvasEl();
+    var rep = [];
+    rep.push('ui=' + !!window.__aiosUI + ' rfb=' + !!r + ' c2e=' + !!window.__aiosC2E +
+             ' btn=' + !!(r && typeof r._handleMouseButton === 'function'));
+    rep.push('etat=' + (r && r._rfbConnectionState));
+    if (c) {
+      var b = c.getBoundingClientRect();
+      rep.push('canvas=' + c.width + 'x' + c.height + ' rect=' + Math.round(b.width) + 'x' + Math.round(b.height));
+    }
+    lastCX = null; lastCY = null;
+    try { wheelAt(1); rep.push('wheel-bas OK'); } catch (e) { rep.push('wheel KO ' + e.message); }
+    setTimeout(function () { try { wheelAt(1); } catch (e) {} }, 250);
+    setTimeout(function () { try { wheelAt(-1); } catch (e) {} }, 500);
+    setTimeout(function () {
+      try { wheelAt(1); } catch (e) {}
+      var txt = rep.join(' | ');
+      try { localStorage.setItem('aios.test', txt); } catch (e) {}
+      apiPost('/api/desktop/clipboard', { text: 'AIOS-TEST ' + txt });
+    }, 800);
+  }
+  if (/[?&]aiostest=1/.test(location.search)) setTimeout(runSelfTest, 3500);
 
   setTimeout(function () {
     lastW = window.innerWidth;
