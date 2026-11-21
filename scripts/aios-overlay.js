@@ -284,7 +284,7 @@
     }
   }, true);
 
-  var sdrag = null, stick = null, sacc = 0;
+  var sdrag = null;
   function wheelAt(dir) {
     // EXACTEMENT « déplacer la souris vers un point + utiliser la molette » :
     // même conversion que noVNC (clientToElement), même appel interne
@@ -317,42 +317,81 @@
       });
     }
   }
-  function scrollTick() {
-    if (!sdrag || !sdrag.off) { sacc = 0; return; }
-    var half = sdrag.h / 2 - 13;
-    var ratio = Math.min(1, Math.abs(sdrag.off) / (half || 1));
-    // Vitesse EXPONENTIELLE : très lent près du centre, très vite au bout.
-    var speed = 0.35 + 15 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
-    var dir = sdrag.off < 0 ? 1 : -1; // vers le haut = défile vers le bas
-    sacc += speed * 0.08;
-    while (sacc >= 1) { sacc -= 1; wheelAt(dir); }
+  // ---- Moteur de défilement CONTINU : 50 Hz + accumulation fractionnelle ----
+  // Plus aucun « cran » isolé : le flux de crans est continu, et le relâchement
+  // lance une inertie naturelle (façon appareil natif).
+  var mTimer = null, mAcc = 0, mPerTick = 0;
+  function motionSet(perTick) {
+    mPerTick = perTick;
+    if (mTimer == null) {
+      mTimer = setInterval(function () {
+        mAcc += mPerTick;
+        if (Math.abs(mAcc) >= 1) {
+          var n = Math.trunc(mAcc);
+          mAcc -= n;
+          wheelAt(n > 0 ? 1 : -1);
+        }
+      }, 20);
+    }
+  }
+  function motionStop() {
+    if (mTimer != null) { clearInterval(mTimer); mTimer = null; }
+    mAcc = 0; mPerTick = 0;
+  }
+  function motionInertia(v0) {
+    motionStop();
+    mPerTick = v0 / 50;
+    mTimer = setInterval(function () {
+      mPerTick *= 0.94;
+      if (Math.abs(mPerTick * 50) < 0.6) { motionStop(); return; }
+      mAcc += mPerTick;
+      if (Math.abs(mAcc) >= 1) {
+        var n = Math.trunc(mAcc);
+        mAcc -= n;
+        wheelAt(n > 0 ? 1 : -1);
+      }
+    }, 20);
   }
   knob.addEventListener('pointerdown', function (e) {
     e.preventDefault();
     e.stopPropagation();
     try { knob.setPointerCapture(e.pointerId); } catch (err) {}
     var r = track.getBoundingClientRect();
-    sdrag = { y0: e.clientY, off: 0, h: r.height };
+    sdrag = { y0: e.clientY, off: 0, h: r.height, t: Date.now(), vel: 0 };
     knob.style.transition = 'none';
     track.style.opacity = '0.95';
-    clearInterval(stick);
-    stick = setInterval(scrollTick, 80);
+    motionStop();
   });
   knob.addEventListener('pointermove', function (e) {
     if (!sdrag) return;
     e.preventDefault();
     var half = sdrag.h / 2 - 13;
     var off = Math.max(-half, Math.min(half, e.clientY - sdrag.y0));
+    var now = Date.now(), dt = Math.max(8, now - sdrag.t);
+    if (off !== sdrag.off) {
+      sdrag.vel = 0.55 * sdrag.vel + 0.45 * ((off - sdrag.off) / dt * 1000); // px/s
+    }
+    sdrag.t = now;
     sdrag.off = off;
     knob.style.top = (sdrag.h / 2 - 13 + off) + 'px';
+    if (!off) { motionSet(0); return; }
+    var ratio = Math.min(1, Math.abs(off) / (half || 1));
+    // Vitesse EXPONENTIELLE : très lent près du centre, très vite au bout.
+    var speed = 0.35 + 22 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
+    var dir = off < 0 ? 1 : -1; // vers le haut = défile vers le bas
+    motionSet(dir * speed / 50); // flux continu à 50 Hz
   });
   function endScroll() {
     if (!sdrag) return;
+    var half = sdrag.h / 2 - 13;
+    var v = -sdrag.vel / (half || 1) * 22; // vitesse du doigt prolongée (crans/s)
+    v = Math.max(-26, Math.min(26, v));
     sdrag = null;
-    clearInterval(stick);
     knob.style.transition = 'top .25s ease,background .2s';
     knob.style.top = 'calc(50% - 13px)';
     track.style.opacity = '.42';
+    if (Math.abs(v) > 2.5) motionInertia(v);
+    else motionStop();
   }
   knob.addEventListener('pointerup', endScroll);
   knob.addEventListener('pointercancel', endScroll);
@@ -651,6 +690,21 @@
     }, 800);
   }
   if (/[?&]aiostest=1/.test(location.search)) setTimeout(runSelfTest, 3500);
+
+  // ---- Fluidité du flux : encodage net et rapide (Tight/JPEG haut de gamme) ----
+  function tuneRfb() {
+    var r = rfbObj();
+    if (!r) return;
+    try {
+      if ('qualityLevel' in r) r.qualityLevel = 8;
+      if ('compressionLevel' in r) r.compressionLevel = 2;
+    } catch (e) {}
+    try { r.__aiosTuned = true; } catch (e) {}
+  }
+  setInterval(function () {
+    var r = rfbObj();
+    if (r && !r.__aiosTuned) tuneRfb();
+  }, 2000);
 
   setTimeout(function () {
     lastW = window.innerWidth;
