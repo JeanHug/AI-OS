@@ -4,17 +4,18 @@
  *   - le bouton flottant plein écran (26 px, déplaçable) ; APPUI LONG = menu
  *     d'outils en grille (3 par ligne) ; jusqu'à 3 icônes forment une fine
  *     barre compacte qui remplace le bouton ;
- *   - les outils : plein écran, clavier au tap (mode), copier, coller,
- *     presse-papier appareil → VM, VM → appareil — TOUT passe par le canal
- *     VNC lui-même (UI.rfb) : zéro latence ;
- *   - le DÉFILEMENT par fin curseur vertical en bas à droite : on l'attrape,
- *     on le décale (vers le haut = défile vers le bas, vers le bas = vers le
- *     haut), la vitesse est exponentielle selon l'écart au centre ; lâché, il
- *     revient au milieu. La molette agit à la position du DERNIER CLIC.
- *     Ce mode n'avale JAMAIS les touches : les clics restent natifs ;
+ *   - les outils : plein écran, clavier au tap (mode), curseur de défilement
+ *     (mode — le curseur n'apparaît QUE quand le mode est lancé), copier,
+ *     coller, presse-papier appareil → VM, VM → appareil — TOUT passe par le
+ *     canal VNC lui-même (UI.rfb) : zéro latence ;
+ *   - le DÉFILEMENT : fin curseur vertical en bas à droite (poignée petite) ;
+ *     vers le haut = défile vers le bas, vers le bas = vers le haut ; vitesse
+ *     exponentielle selon l'écart au centre ; lâché, il revient au milieu.
+ *     La molette agit à la position du DERNIER CLIC. Aucun geste intercepté ;
+ *   - RECONNEXION SUPERVISÉE EN CONTINU (case noVNC cochée + relance toutes
+ *     les 3 s si besoin) : la page reste stable, jamais « chargée à l'infini » ;
  *   - l'adaptation du bureau à la zone VISIBLE (plein écran compris), avec
- *     reconnexion automatique de noVNC ;
- *   - l'écran qui ne s'éteint pas, une aide brève au premier lancement.
+ *     recalage automatique ; l'écran qui ne s'éteint pas ; une aide brève.
  */
 (function () {
   'use strict';
@@ -24,7 +25,6 @@
   try {
     localStorage.setItem('reconnect', 'true');
     localStorage.setItem('reconnect_delay', '3000');
-    localStorage.removeItem('aios.mode.scroll'); // l'ancien mode n'existe plus
   } catch (e) {}
 
   // -------------------------------------------------------------------------
@@ -75,13 +75,15 @@
   }
 
   // -------------------------------------------------------------------------
-  // Les 6 outils
+  // Les 7 outils
   // -------------------------------------------------------------------------
   var TOOLS = [
     { id: 'fs', label: 'Plein écran', mode: true,
       icon: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>' },
     { id: 'kb', label: 'Clavier au tap', mode: true,
       icon: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/>' },
+    { id: 'scroll', label: 'Curseur de défilement', mode: true,
+      icon: '<path d="M8 5l4-3 4 3M8 19l4 3 4-3M12 2v20"/>' },
     { id: 'copy', label: 'Copier', mode: false,
       icon: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>' },
     { id: 'paste', label: 'Coller', mode: false,
@@ -108,7 +110,7 @@
   }
 
   var selected = loadSel();
-  var modes = { kb: loadMode('kb') };
+  var modes = { kb: loadMode('kb'), scroll: loadMode('scroll') };
 
   var pill = el('<div id="aios-pill"></div>');
   var bar = el('<div id="aios-bar"></div>');
@@ -117,7 +119,7 @@
     '<div id="aios-tuto"><div class="card"><h2>Piloter le bureau au doigt</h2><ul>' +
     '<li>Tapez pour cliquer, glissez pour déplacer — noVNC gère les clics nativement.</li>' +
     '<li>Appui LONG sur le bouton : le menu d’outils (jusqu’à 3 icônes dans la barre).</li>' +
-    '<li>Le fin curseur en bas à droite fait défiler : décalez-le vers le haut pour descendre, vers le bas pour monter ; la vitesse augmente avec l’écart.</li>' +
+    '<li>Activez le mode « curseur » : un fin curseur en bas à droite fait défiler (vers le haut = descendre, vitesse selon l’écart).</li>' +
     '<li>Le bureau épouse votre écran, plein écran compris ; la reconnexion est automatique.</li>' +
     '</ul><button id="aios-tutook">Compris</button></div></div>'
   );
@@ -244,6 +246,12 @@
       say(modes.kb ? 'Clavier au tap : activé' : 'Clavier au tap : désactivé');
       renderBar(); buzz(8); return;
     }
+    if (id === 'scroll') {
+      modes.scroll = !modes.scroll; saveMode('scroll', modes.scroll);
+      applyScroll();
+      say(modes.scroll ? 'Curseur de défilement : affiché' : 'Curseur de défilement : masqué');
+      renderBar(); buzz(8); return;
+    }
     if (id === 'copy') { doCopy(); return; }
     if (id === 'paste') { doPaste(); return; }
     if (id === 'clip2vm') { doClip2vm(); return; }
@@ -251,17 +259,21 @@
   }
 
   // -------------------------------------------------------------------------
-  // Fin curseur de défilement (bas droite) — vitesse exponentielle
+  // Fin curseur de défilement (bas droite) — VISIBLE seulement en mode
   // -------------------------------------------------------------------------
   var track = el('<div id="aios-scroll"></div>');
   var knob = el('<div id="aios-scrollknob"></div>');
   track.appendChild(knob);
   track.setAttribute('style', 'position:fixed;right:6px;bottom:calc(46px + env(safe-area-inset-bottom));z-index:2050;' +
     'width:26px;height:33vh;min-height:150px;max-height:300px;border-radius:13px;background:rgba(0,0,0,.30);' +
-    'border:1px solid rgba(255,255,255,.30);touch-action:none;opacity:.42;transition:opacity .2s;box-sizing:border-box');
-  knob.setAttribute('style', 'position:absolute;left:2px;right:2px;height:46px;top:calc(50% - 23px);border-radius:10px;' +
+    'border:1px solid rgba(255,255,255,.30);touch-action:none;opacity:.42;transition:opacity .2s;box-sizing:border-box;display:none');
+  knob.setAttribute('style', 'position:absolute;left:2px;right:2px;height:26px;top:calc(50% - 13px);border-radius:8px;' +
     'background:rgba(255,255,255,.78);transition:top .25s ease,background .2s;touch-action:none');
   document.body.appendChild(track);
+  function applyScroll() {
+    track.style.display = modes.scroll ? 'block' : 'none';
+    endScroll();
+  }
 
   var lastCX = null, lastCY = null;
   window.addEventListener('click', function (e) {
@@ -289,7 +301,7 @@
   }
   function scrollTick() {
     if (!sdrag || !sdrag.off) { sacc = 0; return; }
-    var half = sdrag.h / 2 - 23;
+    var half = sdrag.h / 2 - 13;
     var ratio = Math.min(1, Math.abs(sdrag.off) / (half || 1));
     // Vitesse EXPONENTIELLE : très lent près du centre, très vite au bout.
     var speed = 0.35 + 15 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
@@ -311,17 +323,17 @@
   knob.addEventListener('pointermove', function (e) {
     if (!sdrag) return;
     e.preventDefault();
-    var half = sdrag.h / 2 - 23;
+    var half = sdrag.h / 2 - 13;
     var off = Math.max(-half, Math.min(half, e.clientY - sdrag.y0));
     sdrag.off = off;
-    knob.style.top = (sdrag.h / 2 - 23 + off) + 'px';
+    knob.style.top = (sdrag.h / 2 - 13 + off) + 'px';
   });
   function endScroll() {
     if (!sdrag) return;
     sdrag = null;
     clearInterval(stick);
     knob.style.transition = 'top .25s ease,background .2s';
-    knob.style.top = 'calc(50% - 23px)';
+    knob.style.top = 'calc(50% - 13px)';
     track.style.opacity = '.42';
   }
   knob.addEventListener('pointerup', endScroll);
@@ -463,6 +475,7 @@
   }, true);
 
   renderBar();
+  applyScroll();
 
   // -------------------------------------------------------------------------
   // Tactile : 3 doigts = plein écran ; clavier au tap (mode) — JAMAIS de
@@ -498,6 +511,35 @@
   }, { capture: true, passive: true });
 
   // -------------------------------------------------------------------------
+  // RECONNEXION SUPERVISÉE EN CONTINU : case noVNC cochée (reconnexion auto
+  // native) + relance toutes les 3 s si le bouton Connexion apparaît. La page
+  // ne reste JAMAIS bloquée en chargement, quel que soit le temps du recalage.
+  // -------------------------------------------------------------------------
+  function enableNoVncReconnect() {
+    try {
+      var cb = document.getElementById('noVNC_setting_reconnect');
+      if (cb && cb.type === 'checkbox' && !cb.checked) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      var d = document.getElementById('noVNC_setting_reconnect_delay');
+      if (d && d.value !== '3000') {
+        d.value = '3000';
+        d.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } catch (e) {}
+  }
+  function superviseConnect() {
+    enableNoVncReconnect();
+    var btn = document.getElementById('noVNC_connect_button');
+    if (btn && btn.offsetParent !== null && !btn.disabled) {
+      try { btn.click(); buzz(8); } catch (e) {}
+    }
+    setTimeout(superviseConnect, 3000);
+  }
+  setTimeout(superviseConnect, 900);
+
+  // -------------------------------------------------------------------------
   // Adaptation à la zone VISIBLE (largeur ET hauteur) : plein écran, rotation…
   // Le clavier du téléphone (hauteur seule) ne déclenche jamais ceci.
   // -------------------------------------------------------------------------
@@ -513,14 +555,6 @@
 
   var resizeAttempts = 0, resizeBusy = false;
 
-  function healConnect(deadlineMs) {
-    var btn = document.getElementById('noVNC_connect_button');
-    if (btn && btn.offsetParent !== null && !btn.disabled) {
-      try { btn.click(); buzz(10); } catch (e) {}
-    }
-    if (Date.now() < deadlineMs) setTimeout(function () { healConnect(deadlineMs); }, 2000);
-  }
-
   function adaptScreen() {
     lastW = window.innerWidth;
     if (!sig || resizeBusy || resizeAttempts >= 6) return;
@@ -534,10 +568,9 @@
         var heightBad = Math.abs(g.height - t.h) > Math.max(24, t.h * 0.025);
         if (!widthBad && !heightBad) { resizeAttempts = 0; resizeBusy = false; return; }
         resizeAttempts++;
-        say('Adaptation de l’écran à votre appareil…', 6000);
+        say('Adaptation de l’écran à votre appareil…', 8000);
         return apiPost('/api/desktop/resize', { width: t.w, height: t.h }).then(function () {
           resizeBusy = false;
-          healConnect(Date.now() + 30000);
         }).catch(function () { resizeBusy = false; });
       })
       .catch(function () { resizeBusy = false; });
@@ -579,5 +612,6 @@
     adaptScreen();
     wake();
     hookClip();
+    enableNoVncReconnect();
   }, 1200);
 })();

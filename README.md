@@ -47,11 +47,13 @@ surcouche légère (`scripts/aios-overlay.js`, intégrée dans la page) :
   | ⬇ Presse-papier → VM | action | envoie le presse-papier de l'appareil dans la VM |
   | ⬆ VM → presse-papier | action | copie le presse-papier de la VM sur l'appareil |
 
-- **Défilement par fin curseur vertical** (bas de l'écran, côté droit) : on
-  l'attrape et on le décale — vers le haut pour descendre, vers le bas pour
-  monter — la vitesse est **exponentielle** selon l'écart au centre ; lâché, il
-  revient au milieu. La molette agit à la position du **dernier clic**. Aucun
-  geste n'est intercepté : les clics restent natifs.
+- **Défilement par fin curseur vertical** (mode activable dans le menu ; le
+  curseur n'apparaît qu'une fois le mode lancé) : en bas de l'écran, côté
+  droit, poignée fine — on l'attrape et on la décale : vers le haut pour
+  descendre, vers le bas pour monter ; la vitesse est **exponentielle** selon
+  l'écart au centre ; lâchée, elle revient au milieu. La molette agit à la
+  position du **dernier clic**. Aucun geste n'est intercepté : les clics
+  restent natifs.
 
 - **Adaptation automatique du bureau** : la VM passe au format exact de la
   zone visible (rotation, plein écran, appareil) ; **la reconnexion est
