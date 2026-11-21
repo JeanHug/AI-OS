@@ -195,6 +195,8 @@ export default {
           "sleep 1",
           "pkill -9 -x x11vnc 2>/dev/null; pkill -9 -x websockify 2>/dev/null; pkill -9 -x Xvfb 2>/dev/null",
           "for i in 1 2 3 4 5 6 7 8; do if ss -ltn | grep -q ':5900 ' || ss -ltn | grep -q ':6080 '; then sleep 1; else break; fi; done",
+          "mkdir -p /home/aios/.config/xfce4/xfconf/xfce-perchannel-xml",
+          "printf %s 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGNoYW5uZWwgbmFtZT0ieGZjZTQtZGVza3RvcCIgdmVyc2lvbj0iMS4wIj4KICA8cHJvcGVydHkgbmFtZT0iYmFja2Ryb3AiIHR5cGU9ImVtcHR5Ij4KICAgIDxwcm9wZXJ0eSBuYW1lPSJtb25pdG9yc2NyZWVuIiB0eXBlPSJlbXB0eSI+CiAgICAgIDxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii9ob21lL2Fpb3Mvd2hpdGUucG5nIi8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9ImNvbG9yLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSIxIi8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9InJnYmEiIHR5cGU9ImFycmF5Ij4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICA8L3Byb3BlcnR5PgogICAgICA8L3Byb3BlcnR5PgogICAgICA8cHJvcGVydHkgbmFtZT0id29ya3NwYWNlMSIgdHlwZT0iZW1wdHkiPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJsYXN0LWltYWdlIiB0eXBlPSJzdHJpbmciIHZhbHVlPSIvaG9tZS9haW9zL3doaXRlLnBuZyIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJpbWFnZS1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iNSIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJjb2xvci1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iMSIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJyZ2JhIiB0eXBlPSJhcnJheSI+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgPC9wcm9wZXJ0eT4KICAgICAgPC9wcm9wZXJ0eT4KICAgIDwvcHJvcGVydHk+CiAgPC9wcm9wZXJ0eT4KPC9jaGFubmVsPgo=' | base64 -d > /home/aios/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml",
           `setsid nohup Xvfb :99 -screen 0 ${w}x${h}x24 >/tmp/aios-xvfb.log 2>&1 &`,
           "sleep 1.6",
           "setsid nohup env DISPLAY=:99 xfce4-session >/tmp/aios-xfce.log 2>&1 &",
@@ -206,6 +208,10 @@ export default {
           'ss -ltn | grep -q ":5900 " || setsid nohup x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -xkb -wait 8 -defer 8 -o /tmp/aios-x11vnc.log >/dev/null 2>&1 &',
           'ss -ltn | grep -q ":6080 " || setsid nohup websockify --web=/usr/share/novnc 127.0.0.1:6080 localhost:5900 >/tmp/aios-websockify.log 2>&1 &',
           "sleep 1",
+          "export DISPLAY=:99; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus",
+          "for ws in workspace0 workspace1; do xfconf-query -c xfce4-desktop -p /backdrop/monitorscreen/$ws/last-image -s /home/aios/white.png 2>/dev/null; xfconf-query -c xfce4-desktop -p /backdrop/monitorscreen/$ws/image-style -s 5 2>/dev/null; xfconf-query -c xfce4-desktop -p /backdrop/monitorscreen/$ws/color-style -s 1 2>/dev/null; done",
+          "xfdesktop --reload 2>/dev/null || true",
+          "pgrep -x chrome >/dev/null || setsid nohup env DISPLAY=:99 ACCESSIBILITY_ENABLED=1 google-chrome-stable --force-renderer-accessibility --no-first-run >/dev/null 2>&1 &",
           'xrandr 2>/dev/null | grep -o "current [0-9]* x [0-9]*" || true',
         ].join("\n");
         const r = await linuxExec(env, script, 90);

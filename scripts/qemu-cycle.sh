@@ -83,7 +83,7 @@ wait_tunnel_registered() {
 # Surveillance commune aux phases produce et overlap.
 monitor_loop() {
   local duration=$1 label=$2
-  local start now elapsed last_beat=0
+  local start now elapsed last_beat=0 last_save_try=-999
   start=$(date +%s)
   while :; do
     now=$(date +%s); elapsed=$((now - start))
@@ -113,6 +113,10 @@ monitor_loop() {
       last_beat=$elapsed
       local up; up=$(aios_guest_ssh sshopts 30 'uptime -p' 2>/dev/null || echo 'invité muet')
       aios_log "[$label +$((elapsed / 60))m] service actif — VM : $up"
+    fi
+    if [[ "$label" == "chevauchement" && "$(state_read saved)" != "1" ]] && (( elapsed - last_save_try >= 300 )); then
+      last_save_try=$elapsed
+      save_checkpoint || aios_warn "Checkpoint toujours non publié : nouvelle tentative dans 5 min (le service continue)."
     fi
     (( elapsed >= duration )) && break
     sleep 20
