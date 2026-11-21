@@ -2,25 +2,24 @@
  * aios-overlay.js — surcouche AI OS posée sur l'interface noVNC classique.
  *
  * Ajoute, SANS rien modifier de noVNC (ni ses clics, ni son panneau) :
- *   - le bouton flottant plein écran (grand, déplaçable) ; APPUI LONG = menu
- *     d'outils : on choisit jusqu'à 3 icônes qui forment alors une fine barre
- *     horizontale (remplaçant le bouton) ;
+ *   - le bouton flottant plein écran (26 px, déplaçable) ; APPUI LONG = menu
+ *     d'outils en GRILLE (3 par ligne) ; jusqu'à 3 icônes forment une fine
+ *     barre horizontale compacte qui remplace le bouton ;
  *   - les outils : plein écran, clavier au tap (mode), défiler à la molette
- *     (mode), copier, coller, presse-papier appareil → VM, VM → appareil ;
+ *     (mode propre : un vrai défilement est détecté par seuil + direction, et
+ *     alors plus aucun clic/appui long n'est émis), copier, coller,
+ *     presse-papier appareil → VM, VM → appareil ;
+ *   - TOUTES les frappes/molettes passent par le canal VNC lui-même (UI.rfb) :
+ *     zéro latence SSH ;
  *   - l'adaptation du bureau à la zone VISIBLE (plein écran compris), avec
  *     reconnexion automatique de noVNC ;
  *   - l'écran qui ne s'éteint pas, une aide brève au premier lancement.
- *
- * Le jeton de bureau est lu dans l'URL de la page, ou à défaut dans le
- * localStorage / cookie lisible / nom de fenêtre (posés par mobile.html).
  */
 (function () {
   'use strict';
 
   var API = 'https://ai-os.hugdu77777.workers.dev';
 
-  // Réglages natifs de noVNC activés avant son démarrage : reconnexion
-  // automatique si elle est disponible dans cette version.
   try {
     localStorage.setItem('reconnect', 'true');
     localStorage.setItem('reconnect_delay', '3000');
@@ -47,7 +46,23 @@
   }
 
   // -------------------------------------------------------------------------
-  // Styles
+  // Accès direct à la connexion VNC (injection vue côté page : window.__aiosUI)
+  // -------------------------------------------------------------------------
+  function rfbObj() { return (window.__aiosUI && window.__aiosUI.rfb) || null; }
+  function canvasEl() { return document.querySelector('#noVNC_container canvas'); }
+  function toFb(cx, cy) {
+    var c = canvasEl(), r = rfbObj();
+    if (!c) return { x: Math.round(cx), y: Math.round(cy) };
+    var b = c.getBoundingClientRect();
+    var fw = (r && r._fbWidth) || b.width, fh = (r && r._fbHeight) || b.height;
+    return {
+      x: Math.max(0, Math.round((cx - b.left) * (fw / (b.width || 1)))),
+      y: Math.max(0, Math.round((cy - b.top) * (fh / (b.height || 1)))),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Styles (compacts)
   // -------------------------------------------------------------------------
   var css = [
     '#aios-pill{position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:2000;',
@@ -55,17 +70,11 @@
     'font-size:12.5px;font-family:system-ui,sans-serif;color:#eee;opacity:0;transition:opacity .35s;',
     'pointer-events:none;white-space:nowrap}',
     '#aios-pill.aios-show{opacity:1}',
-    '#aios-bar{position:fixed;z-index:2100;display:flex;gap:4px;padding:4px;border-radius:12px;',
-    'background:rgba(0,0,0,.72);border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);',
-    'right:10px;top:38%;touch-action:none}',
-    '#aios-bar button{width:34px;height:34px;padding:0;margin:0;border:0;border-radius:8px;background:transparent;',
-    'display:flex;align-items:center;justify-content:center;cursor:pointer}',
-    '#aios-bar button.aios-on{background:#2b5fc7}',
-    '#aios-menu{position:fixed;z-index:2200;display:none;background:rgba(16,16,16,.96);border:1px solid rgba(255,255,255,.22);',
-    'border-radius:14px;padding:10px;max-width:236px;flex-wrap:wrap;gap:6px;justify-content:center}',
-    '#aios-menu.aios-show{display:flex}',
-    '#aios-menu button{width:44px;height:44px;border-radius:10px;background:#232323;border:1.5px solid rgba(255,255,255,.14);',
-    'display:flex;align-items:center;justify-content:center;cursor:pointer}',
+    '#aios-menu{position:fixed;z-index:2200;display:none;grid-template-columns:repeat(3,30px);gap:4px;',
+    'background:rgba(16,16,16,.96);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:8px}',
+    '#aios-menu.aios-show{display:grid}',
+    '#aios-menu button{width:30px;height:30px;padding:0;border-radius:8px;background:#232323;',
+    'border:1.5px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;cursor:pointer}',
     '#aios-menu button.aios-sel{background:#2b5fc7;border-color:#7aa5f0}',
     '#aios-tuto{position:fixed;inset:0;z-index:2300;display:none;background:rgba(0,0,0,.78);place-items:center;padding:22px}',
     '#aios-tuto.aios-show{display:grid}',
@@ -86,13 +95,13 @@
     return d.firstChild;
   }
   function svg(paths, size) {
-    return '<svg viewBox="0 0 24 24" width="' + (size || 20) + '" height="' + (size || 20) +
+    return '<svg viewBox="0 0 24 24" width="' + (size || 15) + '" height="' + (size || 15) +
       '" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">' +
       paths + '</svg>';
   }
 
   // -------------------------------------------------------------------------
-  // La boîte à outils : 7 fonctions, 3 sélectionnables dans la barre
+  // Les 7 outils
   // -------------------------------------------------------------------------
   var TOOLS = [
     { id: 'fs', label: 'Plein écran', mode: true,
@@ -135,7 +144,7 @@
   var tuto = el(
     '<div id="aios-tuto"><div class="card"><h2>Piloter le bureau au doigt</h2><ul>' +
     '<li>Tapez pour cliquer, glissez pour déplacer — noVNC gère les clics nativement.</li>' +
-    '<li>Appui LONG sur le bouton : le menu d’outils (choisissez-en jusqu’à 3, ils forment une barre).</li>' +
+    '<li>Appui LONG sur le bouton : le menu d’outils (jusqu’à 3 icônes dans la barre).</li>' +
     '<li>Le bureau épouse votre écran, plein écran compris ; la reconnexion est automatique.</li>' +
     '</ul><button id="aios-tutook">Compris</button></div></div>'
   );
@@ -153,8 +162,31 @@
   function buzz(m) { try { navigator.vibrate && navigator.vibrate(m); } catch (e) {} }
 
   // -------------------------------------------------------------------------
-  // Actions outils
+  // Actions — TOUT passe par le canal VNC (instantané) ; l'API est le repli.
   // -------------------------------------------------------------------------
+  var KEYSYM = { ctrl: 0xffe3, c: 0x63, v: 0x76, x: 0x78, a: 0x61 };
+  var CODE = { ctrl: 'ControlLeft', c: 'KeyC', v: 'KeyV', x: 'KeyX', a: 'KeyA' };
+  function sendChord(letter) {
+    var r = rfbObj();
+    if (r && typeof r.sendKey === 'function') {
+      try {
+        r.sendKey(KEYSYM.ctrl, CODE.ctrl, true);
+        r.sendKey(KEYSYM[letter], CODE[letter], true);
+        r.sendKey(KEYSYM[letter], CODE[letter], false);
+        r.sendKey(KEYSYM.ctrl, CODE.ctrl, false);
+        return true;
+      } catch (e) {}
+    }
+    return false;
+  }
+  function apiPost(path, body) {
+    return fetch(apiUrl(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) { return r.json(); });
+  }
+
   function toggleFs() {
     buzz(12);
     if (document.fullscreenElement) {
@@ -165,45 +197,58 @@
   }
   function openKb() {
     var t = document.getElementById('noVNC_keyboardinput');
+    if (!t) return;
     try {
-      if (t) {
-        if (document.activeElement === t) t.blur();
-        t.focus({ preventScroll: true });
-      }
+      if (document.activeElement === t) t.blur();
+      t.focus({ preventScroll: true });
     } catch (e) {}
   }
-  function apiPost(path, body) {
-    return fetch(apiUrl(path), {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json(); });
-  }
   function doCopy() {
-    apiPost('/api/desktop/keys', { key: 'ctrl+c' }).then(function () { say('Copié dans la VM'); buzz(8); });
+    if (sendChord('c')) { buzz(8); say('Copié dans la VM'); return; }
+    apiPost('/api/desktop/keys', { key: 'ctrl+c' }).then(function () { buzz(8); say('Copié dans la VM'); });
   }
   function doPaste() {
-    apiPost('/api/desktop/keys', { key: 'ctrl+v' }).then(function () { say('Collé dans la VM'); buzz(8); });
+    if (sendChord('v')) { buzz(8); say('Collé dans la VM'); return; }
+    apiPost('/api/desktop/keys', { key: 'ctrl+v' }).then(function () { buzz(8); say('Collé dans la VM'); });
   }
+  var vmClip = '';
+  function hookClip() {
+    var r = rfbObj();
+    if (!r || hookClip.done || !r.addEventListener) return;
+    hookClip.done = true;
+    try {
+      r.addEventListener('clipboard', function (e) {
+        try { vmClip = (e.detail && e.detail.text) || vmClip; } catch (err) {}
+      });
+    } catch (e) {}
+  }
+  setInterval(hookClip, 700);
   function doClip2vm() {
     try {
       navigator.clipboard.readText().then(function (t) {
-        return apiPost('/api/desktop/clipboard', { text: t || '' });
-      }).then(function () {
-        say('Presse-papier envoyé dans la VM'); buzz(8);
+        t = t || '';
+        var r = rfbObj();
+        if (r && typeof r.clipboardPasteFrom === 'function') {
+          try { r.clipboardPasteFrom(t); buzz(8); say('Presse-papier envoyé dans la VM'); return; } catch (e) {}
+        }
+        return apiPost('/api/desktop/clipboard', { text: t }).then(function () {
+          buzz(8); say('Presse-papier envoyé dans la VM');
+        });
       }).catch(function () { say('Lecture du presse-papier refusée'); });
     } catch (e) { say('Lecture du presse-papier refusée'); }
   }
   function doClip2dev() {
+    var ok = function () { buzz(8); say('Presse-papier copié sur l’appareil'); };
+    if (vmClip) {
+      navigator.clipboard.writeText(vmClip).then(ok).catch(function () { say('Écriture refusée'); });
+      return;
+    }
     fetch(apiUrl('/api/desktop/clipboard'), { method: 'GET' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        return navigator.clipboard.writeText((d && d.text) || '').then(function () {
-          say('Presse-papier copié sur l’appareil'); buzz(8);
-        });
+        return navigator.clipboard.writeText((d && d.text) || '').then(ok);
       })
-      .catch(function () { say('Écriture du presse-papier refusée'); }
-      );
+      .catch(function () { say('Écriture refusée'); });
   }
   function runTool(id) {
     if (id === 'fs') { toggleFs(); return; }
@@ -224,23 +269,21 @@
   }
 
   // -------------------------------------------------------------------------
-  // Contrôle flottant : bouton rond (rien de sélectionné) OU fine barre
+  // Contrôle flottant : bouton rond 26 px (rien de sélectionné) OU fine barre
   // -------------------------------------------------------------------------
   var CTRL_STYLE = 'position:fixed;z-index:2100;right:10px;top:38%;touch-action:none;';
 
   function renderBar() {
     bar.innerHTML = '';
     if (selected.length === 0) {
-      // Bouton rond : plus grand, glyphe centré — appui long = menu.
       bar.setAttribute('style', CTRL_STYLE +
-        'width:42px;height:42px;min-width:42px;min-height:42px;padding:0;margin:0;border-radius:50%;' +
-        'background:#000;border:1.5px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
+        'width:26px;height:26px;min-width:26px;min-height:26px;padding:0;margin:0;border-radius:50%;' +
+        'background:#000;border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
         'display:flex;align-items:center;justify-content:center;box-sizing:border-box;opacity:.72;');
-      bar.innerHTML = svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>', 21);
+      bar.innerHTML = svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>', 15);
     } else {
-      // Fine barre horizontale des outils choisis (3 max).
       bar.setAttribute('style', CTRL_STYLE +
-        'display:flex;gap:4px;padding:4px;border-radius:12px;background:rgba(0,0,0,.72);' +
+        'display:flex;gap:2px;padding:2px;border-radius:9px;background:rgba(0,0,0,.72);' +
         'border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);opacity:.9;');
       selected.forEach(function (id) {
         var t = TOOLS.filter(function (x) { return x.id === id; })[0];
@@ -248,14 +291,15 @@
         var b = document.createElement('button');
         b.setAttribute('data-id', id);
         b.setAttribute('aria-label', t.label);
-        if (t.mode && modes[id]) b.classList.add('aios-on');
-        b.innerHTML = svg(t.icon, 20);
+        b.setAttribute('style', 'width:26px;height:26px;padding:0;margin:0;border:0;border-radius:6px;' +
+          'background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer');
+        if (t.mode && modes[id]) b.style.background = '#2b5fc7';
+        b.innerHTML = svg(t.icon, 15);
         bar.appendChild(b);
       });
     }
   }
 
-  // Long-press + clic + déplacement du contrôle.
   var press = null, moved = false;
   bar.addEventListener('pointerdown', function (e) {
     e.preventDefault();
@@ -284,8 +328,8 @@
     if (!moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
     moved = true;
     clearTimeout(press.lp);
-    bar.style.left = Math.max(4, Math.min(window.innerWidth - 44, press.x + dx)) + 'px';
-    bar.style.top = Math.max(4, Math.min(window.innerHeight - 44, press.y + dy)) + 'px';
+    bar.style.left = Math.max(4, Math.min(window.innerWidth - 30, press.x + dx)) + 'px';
+    bar.style.top = Math.max(4, Math.min(window.innerHeight - 30, press.y + dy)) + 'px';
     bar.style.right = 'auto';
   });
   bar.addEventListener('pointerup', function () {
@@ -304,7 +348,6 @@
     openMenu();
   });
 
-  // Position mémorisée.
   try {
     var p = JSON.parse(localStorage.getItem('aios.fspos') || 'null');
     if (p && isFinite(p.x) && isFinite(p.y)) {
@@ -315,7 +358,7 @@
   } catch (e) {}
 
   // -------------------------------------------------------------------------
-  // Menu (appui long) : choisir / retirer des outils, 3 max
+  // Menu (appui long) : GRILLE de 3 icônes par ligne, compact
   // -------------------------------------------------------------------------
   function openMenu() {
     renderMenu();
@@ -332,7 +375,7 @@
       b.setAttribute('data-id', t.id);
       b.setAttribute('aria-label', t.label);
       if (selected.indexOf(t.id) >= 0) b.classList.add('aios-sel');
-      b.innerHTML = svg(t.icon, 22);
+      b.innerHTML = svg(t.icon, 17);
       menu.appendChild(b);
     });
   }
@@ -347,7 +390,6 @@
     try { localStorage.setItem('aios.bar', JSON.stringify(selected)); } catch (e) {}
     renderMenu();
     renderBar();
-    if (selected.length === 0) menu.classList.remove('aios-show');
   });
   window.addEventListener('pointerdown', function (e) {
     if (menu.classList.contains('aios-show') && !menu.contains(e.target) &&
@@ -359,14 +401,44 @@
   renderBar();
 
   // -------------------------------------------------------------------------
-  // Mode clavier au tap : chaque tap sur l'écran déploie le clavier
-  // (après le clic — jamais pendant) ; mode défiler : le défilement du doigt
-  // devient la molette du PC, souris positionnée au départ du geste.
+  // Tactile : mode clavier au tap (ouverture RAPIDE, après le clic) ;
+  // mode défiler PROPRE : seuil + direction avant tout envoi, et une fois le
+  // défilement reconnu, plus AUCUN clic ni appui long n'est émis.
   // -------------------------------------------------------------------------
   var tapInfo = null, scrollInfo = null;
   function onControl(target) {
     return (bar.contains && bar.contains(target)) || (menu.contains && menu.contains(target));
   }
+  function synthClick(cx, cy) {
+    var c = canvasEl();
+    if (c) {
+      try {
+        var base = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+        c.dispatchEvent(new MouseEvent('mousedown', Object.assign({}, base, { button: 0, buttons: 1 })));
+        c.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, base, { button: 0, buttons: 0 })));
+        return;
+      } catch (e) {}
+    }
+    var p = toFb(cx, cy);
+    apiPost('/api/desktop/mouse', { action: 'click', x: p.x, y: p.y, button: 1 });
+  }
+  function sendWheel(dir, cx, cy) {
+    var c = canvasEl(), r = rfbObj();
+    if (c && r) {
+      try {
+        c.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true, view: window,
+          clientX: cx, clientY: cy, deltaY: dir * 50, deltaMode: 0, buttons: 0,
+        }));
+        return;
+      } catch (e) {}
+    }
+    var p = toFb(cx, cy);
+    apiPost('/api/desktop/mouse', {
+      action: 'scroll', direction: dir < 0 ? 'up' : 'down', x: p.x, y: p.y, amount: 1,
+    });
+  }
+
   window.addEventListener('touchstart', function (e) {
     if (e.touches && e.touches.length >= 3) {
       e.preventDefault();
@@ -374,45 +446,73 @@
       toggleFs();
       return;
     }
-    if (!e.touches || e.touches.length !== 1 || onControl(e.target)) { tapInfo = null; scrollInfo = null; return; }
+    if (!e.touches || e.touches.length !== 1 || onControl(e.target)) {
+      tapInfo = null; scrollInfo = null; return;
+    }
     var t = e.touches[0];
-    tapInfo = { x: t.clientX, y: t.clientY, moved: false };
     if (modes.scroll) {
-      scrollInfo = { x0: t.clientX, y0: t.clientY, lastY: t.clientY, acc: 0, moved: false };
+      // Mode défiler : le geste nous appartient ENTIÈREMENT — noVNC ne voit
+      // rien (plus aucun appui long ni clic fantôme possible).
+      e.preventDefault();
+      e.stopPropagation();
+      tapInfo = null;
+      scrollInfo = {
+        x0: t.clientX, y0: t.clientY, lastX: t.clientX, lastY: t.clientY,
+        netDy: 0, absDy: 0, absDx: 0, acc: 0, scroll: false, dead: false, t0: Date.now(),
+      };
+    } else {
+      tapInfo = { x: t.clientX, y: t.clientY, moved: false };
+      scrollInfo = null;
     }
   }, { capture: true, passive: false });
+
   window.addEventListener('touchmove', function (e) {
     if (tapInfo) tapInfo.moved = true;
-    if (!scrollInfo || !e.touches || e.touches.length !== 1) return;
-    var t = e.touches[0];
-    var dy = t.clientY - scrollInfo.lastY;
-    if (!scrollInfo.moved && Math.abs(t.clientY - scrollInfo.y0) < 8) return;
-    if (!scrollInfo.moved) {
-      scrollInfo.moved = true;
-      // Souris VM positionnée à la position de DÉPART du défilement.
-      apiPost('/api/desktop/mouse', { action: 'move', x: Math.round(scrollInfo.x0), y: Math.round(scrollInfo.y0) });
-    }
+    var s = scrollInfo;
+    if (!s || !e.touches || e.touches.length !== 1) return;
     e.preventDefault();
     e.stopPropagation();
-    scrollInfo.acc += dy;
-    while (Math.abs(scrollInfo.acc) >= 22) {
-      var dir = scrollInfo.acc < 0 ? 'up' : 'down';
-      scrollInfo.acc += (dir === 'up' ? 22 : -22);
-      apiPost('/api/desktop/mouse', {
-        action: 'scroll', direction: dir,
-        x: Math.round(scrollInfo.x0), y: Math.round(scrollInfo.y0), amount: 1,
-      });
+    var t = e.touches[0];
+    var dx = t.clientX - s.lastX, dy = t.clientY - s.lastY;
+    s.lastX = t.clientX; s.lastY = t.clientY;
+    s.netDy += dy; s.absDy += Math.abs(dy); s.absDx += Math.abs(dx);
+    if (!s.scroll) {
+      if (s.dead) return;
+      // Défilement = mouvement NET, GLOBALEMENT dans un même sens : seuil de
+      // 30 px utiles pour ne pas confondre un léger décalage avec un défilement.
+      var consistent = Math.abs(s.netDy) >= 0.55 * s.absDy && s.absDx <= s.absDy * 0.8;
+      if (Math.abs(s.netDy) >= 30 && consistent) {
+        s.scroll = true;
+      } else if (s.absDy + s.absDx > 90) {
+        s.dead = true; // geste non concluant : on n'invente rien
+      }
+      return;
     }
-    scrollInfo.lastY = t.clientY;
+    // Défilement confirmé : un cran de molette tous les 30 px de doigt.
+    s.acc += dy;
+    while (Math.abs(s.acc) >= 30) {
+      var dir = s.acc < 0 ? -1 : 1;
+      s.acc -= dir * 30;
+      sendWheel(dir, s.x0, s.y0);
+    }
   }, { capture: true, passive: false });
-  window.addEventListener('touchend', function () {
-    var tap = tapInfo;
-    tapInfo = null;
-    if (scrollInfo && scrollInfo.moved) { scrollInfo = null; return; }
-    scrollInfo = null;
+
+  window.addEventListener('touchend', function (e) {
+    var s = scrollInfo, tap = tapInfo;
+    scrollInfo = null; tapInfo = null;
+    if (modes.scroll && s) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Un TAP bref et immobile = un clic ; tout le reste est ignoré — jamais
+      // de clic ni d'appui long en fin de défilement.
+      if (!s.scroll && !s.dead && (Date.now() - s.t0) < 250 &&
+          Math.abs(s.netDy) < 12 && s.absDx < 12) {
+        synthClick(s.x0, s.y0);
+      }
+      return;
+    }
     if (tap && !tap.moved && modes.kb) {
-      // Ouverture APRÈS le clic (jamais pendant : ça l'annulerait).
-      setTimeout(openKb, 90);
+      setTimeout(openKb, 35);
     }
   }, { capture: true, passive: true });
 
@@ -432,9 +532,6 @@
 
   var resizeAttempts = 0, resizeBusy = false;
 
-  // Après un recalage, la connexion VNC retombe : on relance la connexion de
-  // noVNC (son bouton n'est cliquable que s'il est déconnecté) — la page ne se
-  // recharge pas : le plein écran est conservé.
   function healConnect(deadlineMs) {
     var btn = document.getElementById('noVNC_connect_button');
     if (btn && btn.offsetParent !== null && !btn.disabled) {
@@ -496,12 +593,10 @@
     });
   } catch (e) {}
 
-  // -------------------------------------------------------------------------
-  // Démarrage
-  // -------------------------------------------------------------------------
   setTimeout(function () {
     lastW = window.innerWidth;
     adaptScreen();
     wake();
+    hookClip();
   }, 1200);
 })();

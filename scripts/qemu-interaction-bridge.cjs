@@ -107,7 +107,9 @@ function runGuest(script, { timeoutMs = 30000, maxOut = MAX_TEXT_OUT } = {}) {
     const args = [
       '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new',
       '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`, '-o', 'BatchMode=yes',
-      '-o', 'ConnectTimeout=10', '-p', SSH_PORT,
+      '-o', 'ConnectTimeout=10', '-o', 'ControlMaster=auto',
+      '-o', 'ControlPath=/tmp/aios-ssh-mux', '-o', 'ControlPersist=600',
+      '-p', SSH_PORT,
       `${GUEST_USER}@127.0.0.1`, 'bash', '-s',
     ];
     const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
