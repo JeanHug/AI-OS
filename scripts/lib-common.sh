@@ -178,6 +178,18 @@ aios_guest_ensure_desktop() {
   aios_guest_ssh "$1" 20 'test -f /home/aios/white.png || printf %s iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC | base64 -d > /home/aios/white.png' || aios_warn "Fond blanc non écrit."
   aios_guest_ssh "$1" 20 'printf %s PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGNoYW5uZWwgbmFtZT0ieGZjZTQtZGVza3RvcCIgdmVyc2lvbj0iMS4wIj4KICA8cHJvcGVydHkgbmFtZT0iYmFja2Ryb3AiIHR5cGU9ImVtcHR5Ij4KICAgIDxwcm9wZXJ0eSBuYW1lPSJtb25pdG9yc2NyZWVuIiB0eXBlPSJlbXB0eSI+CiAgICAgIDxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii9ob21lL2Fpb3Mvd2hpdGUucG5nIi8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9ImNvbG9yLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSIxIi8+CiAgICAgICAgPHByb3BlcnR5IG5hbWU9InJnYmEiIHR5cGU9ImFycmF5Ij4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICAgIDx2YWx1ZSB0eXBlPSJ1aW50IiB2YWx1ZT0iNjU1MzUiLz4KICAgICAgICA8L3Byb3BlcnR5PgogICAgICA8L3Byb3BlcnR5PgogICAgICA8cHJvcGVydHkgbmFtZT0id29ya3NwYWNlMSIgdHlwZT0iZW1wdHkiPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJsYXN0LWltYWdlIiB0eXBlPSJzdHJpbmciIHZhbHVlPSIvaG9tZS9haW9zL3doaXRlLnBuZyIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJpbWFnZS1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iNSIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJjb2xvci1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iMSIvPgogICAgICAgIDxwcm9wZXJ0eSBuYW1lPSJyZ2JhIiB0eXBlPSJhcnJheSI+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgICA8dmFsdWUgdHlwZT0idWludCIgdmFsdWU9IjY1NTM1Ii8+CiAgICAgICAgPC9wcm9wZXJ0eT4KICAgICAgPC9wcm9wZXJ0eT4KICAgIDwvcHJvcGVydHk+CiAgPC9wcm9wZXJ0eT4KPC9jaGFubmVsPgo= | base64 -d > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml' \
     || aios_warn "Configuration du fond blanc non écrite."
+
+  # 7. Surcouche mobile (bouton, barre d'outils, curseur, reconnexion
+  #    supervisée) : installée à CHAQUE cycle depuis le dépôt — jamais
+  #    dépendante du checkpoint ni d'une install manuelle.
+  local ov_b64 ip_b64
+  ov_b64=$(base64 < "$AIOS_REPO_ROOT/scripts/aios-overlay.js" | tr -d '\n')
+  ip_b64=$(base64 < "$AIOS_REPO_ROOT/scripts/aios-overlay-install.py" | tr -d '\n')
+  aios_guest_ssh "$1" 90 "mkdir -p /usr/share/novnc
+printf %s '$ov_b64' | base64 -d > /usr/share/novnc/aios-overlay.js
+chmod 644 /usr/share/novnc/aios-overlay.js
+printf %s '$ip_b64' | base64 -d | python3
+touch /usr/share/novnc/vnc.html" || aios_warn "Surcouche mobile non installée."
   return 0
 }
 # Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
