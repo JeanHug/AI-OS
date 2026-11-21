@@ -185,11 +185,10 @@ aios_guest_ensure_desktop() {
   local ov_b64 ip_b64
   ov_b64=$(base64 < "$AIOS_REPO_ROOT/scripts/aios-overlay.js" | tr -d '\n')
   ip_b64=$(base64 < "$AIOS_REPO_ROOT/scripts/aios-overlay-install.py" | tr -d '\n')
-  aios_guest_ssh "$1" 90 "mkdir -p /usr/share/novnc
-printf %s '$ov_b64' | base64 -d > /usr/share/novnc/aios-overlay.js
-chmod 644 /usr/share/novnc/aios-overlay.js
-printf %s '$ip_b64' | base64 -d | python3
-touch /usr/share/novnc/vnc.html" || aios_warn "Surcouche mobile non installée."
+  aios_guest_ssh "$1" 90 "printf %s '$ov_b64' | base64 -d | sudo tee /usr/share/novnc/aios-overlay.js >/dev/null
+sudo chmod 644 /usr/share/novnc/aios-overlay.js
+printf %s '$ip_b64' | base64 -d | sudo python3
+sudo touch /usr/share/novnc/vnc.html" || aios_warn "Surcouche mobile non installée."
   return 0
 }
 # Installation du flux bureau interactif (x11vnc + noVNC/websockify) —
