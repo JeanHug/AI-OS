@@ -184,7 +184,34 @@
       document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(function () {});
     }
   }
+  var kbLift = null;
+  function liftBar() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    if (!kbLift) {
+      kbLift = { y: bar.style.top, x: bar.style.left, right: bar.style.right, pos: barPos, vh: vv.height };
+    }
+    var h = bar.getBoundingClientRect().height || 30;
+    bar.style.top = Math.max(4, vv.offsetTop + vv.height - h - 10) + 'px';
+    bar.style.right = 'auto';
+    if (!bar.style.left) bar.style.left = Math.max(4, window.innerWidth - 40) + 'px';
+  }
+  function unliftBar() {
+    if (!kbLift) return;
+    var s = kbLift; kbLift = null;
+    bar.style.top = s.y || ''; bar.style.left = s.x || ''; bar.style.right = s.right || '';
+    barPos = s.pos;
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+      if (!kbLift) return;
+      var vv = window.visualViewport;
+      if (vv.height > kbLift.vh - 40) unliftBar(); // clavier refermé
+      else liftBar();
+    });
+  }
   function blurKb() {
+    unliftBar();
     var t = document.getElementById('noVNC_keyboardinput');
     if (t && document.activeElement === t) { try { t.blur(); } catch (e) {} }
   }
@@ -197,6 +224,7 @@
       if (document.activeElement === t) t.blur();
       t.focus({ preventScroll: true });
     } catch (e) {}
+    liftBar(); // la barre ne monte QUE ici : clic + mode clavier actif
   }
   // Toute autre source de focus (noVNC, clic, code parasite) est neutralisée :
   // sans le mode, le clavier ne s'ouvre JAMAIS.
@@ -390,13 +418,13 @@
     var ratio = Math.min(1, Math.abs(off) / (half || 1));
     // Vitesse EXPONENTIELLE : très lent près du centre, très vite au bout.
     var speed = 0.5 + 55 * (Math.exp(3 * ratio) - 1) / (Math.exp(3) - 1); // crans/s
-    var dir = off < 0 ? 1 : -1; // vers le haut = défile vers le bas
+    var dir = off < 0 ? -1 : 1; // vers le haut = défiler vers le haut (sens voulu)
     motionSet(dir * speed * 0.016); // flux continu à 62 Hz
   });
   function endScroll() {
     if (!sdrag) return;
     var half = sdrag.h / 2 - 13;
-    var v = -sdrag.vel / (half || 1) * 55; // vitesse du doigt prolongée (crans/s)
+    var v = sdrag.vel / (half || 1) * 55; // inertie dans le sens du geste (crans/s)
     v = Math.max(-60, Math.min(60, v));
     sdrag = null;
     knob.style.transition = 'top .25s ease,background .2s';
@@ -411,18 +439,22 @@
   // -------------------------------------------------------------------------
   // Contrôle flottant : bouton rond 26 px OU fine barre compacte
   // -------------------------------------------------------------------------
-  var CTRL_STYLE = 'position:fixed;z-index:2100;right:10px;top:38%;touch-action:none;box-sizing:border-box;';
+  var CTRL_STYLE = 'position:fixed;z-index:2100;touch-action:none;box-sizing:border-box;';
+  var barPos = null; // position choisie par l'utilisateur (glissement)
+  function posStyle() {
+    return barPos ? ('left:' + barPos.x + 'px;top:' + barPos.y + 'px;right:auto;') : 'right:10px;top:38%;';
+  }
 
   function renderBar() {
     bar.innerHTML = '';
     if (selected.length === 0) {
-      bar.setAttribute('style', CTRL_STYLE +
+      bar.setAttribute('style', CTRL_STYLE + posStyle() +
         'width:26px;height:26px;padding:0;margin:0;border-radius:50%;background:#000;' +
         'border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);' +
         'display:flex;align-items:center;justify-content:center;opacity:.72');
       bar.innerHTML = svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>', 15);
     } else {
-      bar.setAttribute('style', CTRL_STYLE +
+      bar.setAttribute('style', CTRL_STYLE + posStyle() +
         'display:flex;gap:2px;padding:2px;border-radius:9px;background:rgba(0,0,0,.72);' +
         'border:1.5px solid rgba(255,255,255,.55);box-shadow:0 3px 10px rgba(0,0,0,.55);opacity:.9');
       selected.forEach(function (id) {
@@ -468,8 +500,12 @@
     if (!moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
     moved = true;
     clearTimeout(press.lp);
-    bar.style.left = Math.max(4, Math.min(window.innerWidth - 30, press.x + dx)) + 'px';
-    bar.style.top = Math.max(4, Math.min(window.innerHeight - 30, press.y + dy)) + 'px';
+    barPos = {
+      x: Math.max(4, Math.min(window.innerWidth - 30, press.x + dx)),
+      y: Math.max(4, Math.min(window.innerHeight - 30, press.y + dy)),
+    };
+    bar.style.left = barPos.x + 'px';
+    bar.style.top = barPos.y + 'px';
     bar.style.right = 'auto';
   });
   bar.addEventListener('pointerup', function () {
@@ -480,17 +516,19 @@
     if (lp) return;
     if (moved) {
       var r = bar.getBoundingClientRect();
+      barPos = { x: r.left, y: r.top };
       try { localStorage.setItem('aios.fspos', JSON.stringify({ x: r.left, y: r.top })); } catch (e) {}
       return;
     }
     if (icon) { runTool(icon); return; }
     if (selected.length === 0) { toggleFs(); return; }
-    openMenu();
+    // Un appui simple n'ouvre JAMAIS le menu : seul l'appui long le déploie.
   });
 
   try {
     var p = JSON.parse(localStorage.getItem('aios.fspos') || 'null');
     if (p && isFinite(p.x) && isFinite(p.y)) {
+      barPos = { x: p.x, y: p.y };
       bar.style.left = p.x + 'px';
       bar.style.top = p.y + 'px';
       bar.style.right = 'auto';

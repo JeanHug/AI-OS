@@ -50,7 +50,13 @@ export default {
           // WebSocket (noVNC) : transparence totale de la montée de protocole.
           return new Response(null, { status: 101, webSocket: r.webSocket, headers: r.headers });
         }
-        return new Response(r.body, { status: r.status, headers: r.headers });
+        // Anti-cache : le navigateur ne doit JAMAIS resservir une page périmée
+        // (une surcouche ancienne = défilement cassé). Le HTML/JS repart toujours neuf.
+        const h = new Headers(r.headers);
+        if (/text\/html|javascript|css/.test(h.get("content-type") || "")) {
+          h.set("cache-control", "no-store");
+        }
+        return new Response(r.body, { status: r.status, headers: h });
       } catch (e) {
         if (attempt < RETRIES - 1) await pause(RETRY_DELAY_MS);
       }

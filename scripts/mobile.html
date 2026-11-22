@@ -19,7 +19,7 @@
       var hop = Number(sessionStorage.getItem('aios.hop') || 0);
       if (!hop || Date.now() - hop > 60000) {
         sessionStorage.setItem('aios.hop', String(Date.now()));
-        location.replace('/?s=' + encodeURIComponent(s));
+        location.replace('/?s=' + encodeURIComponent(s) + '&v=' + Date.now());
       } else {
         sessionStorage.removeItem('aios.hop');
         location.replace('/vnc.html?s=' + encodeURIComponent(s) + '&v=' + Date.now() +

@@ -332,7 +332,7 @@ export default {
         });
       }
       const grant = await signDesktopGrant(env.VM_API_TOKEN);
-      return Response.redirect(`${linuxPrimaryUrl}/mobile.html?s=${grant}`, 302);
+      return Response.redirect(`${linuxPrimaryUrl}/mobile.html?s=${grant}&v=${Date.now()}`, 302);
     }
 
     // 7. Route générale : Tunnels et Statut Global (/ ou /api/tunnels)
