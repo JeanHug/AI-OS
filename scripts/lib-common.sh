@@ -163,12 +163,17 @@ aios_guest_ensure_desktop() {
 
   # 4. Chrome : accessibilité forcée (sinon Chrome n'expose AUCUN champ texte
   #    à AT-SPI et la détection du clavier est aveugle).
-  aios_guest_ssh "$1" 20 'grep -q force-renderer-accessibility /usr/share/applications/google-chrome.desktop || sudo sed -i "s#^Exec=/usr/bin/google-chrome-stable#Exec=env ACCESSIBILITY_ENABLED=1 /usr/bin/google-chrome-stable --force-renderer-accessibility#" /usr/share/applications/google-chrome.desktop' \
+  aios_guest_ssh "$1" 20 'grep -q force-renderer-accessibility /usr/share/applications/google-chrome.desktop || sudo sed -i "s#^Exec=/usr/bin/google-chrome-stable#Exec=env ACCESSIBILITY_ENABLED=1 /usr/bin/google-chrome-stable --force-renderer-accessibility --no-first-run --no-default-browser-check#" /usr/share/applications/google-chrome.desktop' \
     || aios_warn "Chrome non configuré pour l'accessibilité."
 
   # 5. Raccourci Chrome sur le bureau (double-clic direct : bit exécutable).
   aios_guest_ssh "$1" 20 'command -v google-chrome-stable >/dev/null 2>&1 && { d=$(xdg-user-dir DESKTOP 2>/dev/null || echo /home/aios/Desktop); mkdir -p "$d"; cp /usr/share/applications/google-chrome.desktop "$d/" && chmod +x "$d/google-chrome.desktop"; }' \
     || aios_warn "Raccourci bureau Chrome non posé."
+
+  # 5b. Chrome : JAMAIS la page « Conditions d'utilisation » — sentinelle
+  #     « First Run » + politique gérée, à chaque installation/restauration.
+  aios_guest_ssh "$1" 20 'sudo mkdir -p /etc/opt/chrome/policies/managed /home/aios/.config/google-chrome; printf %s eyJNZXRyaWNzUmVwb3J0aW5nRW5hYmxlZCI6ZmFsc2V9 | base64 -d | sudo tee /etc/opt/chrome/policies/managed/aios.json >/dev/null; sudo touch "/home/aios/.config/google-chrome/First Run"; sudo chown -R aios:aios /home/aios/.config/google-chrome' \
+    || aios_warn "Sentinelle Chrome non posée."
 
   # 6. Fond d'écran blanc, écrit comme fichier de canal xfconf (la session n'est
   #    pas encore lancée : pas de D-Bus). Xvfb nomme la sortie « screen » →
