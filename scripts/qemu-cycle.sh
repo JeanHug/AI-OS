@@ -114,6 +114,13 @@ monitor_loop() {
       local up; up=$(aios_guest_ssh sshopts 30 'uptime -p' 2>/dev/null || echo 'invité muet')
       aios_log "[$label +$((elapsed / 60))m] service actif — VM : $up"
     fi
+    # Filet de sécurité : sauvegarde PÉRIODIQUE en production (45 min) — un
+    # job tué ne peut jamais perdre plus de 45 min d'état.
+    if [[ "$label" == "production" ]] && (( elapsed - last_save_try >= 2700 )); then
+      last_save_try=$elapsed
+      state_write saved 0
+      save_checkpoint || aios_warn "Sauvegarde périodique échouée : nouvelle tentative dans 45 min."
+    fi
     if [[ "$label" == "chevauchement" && "$(state_read saved)" != "1" ]] && (( elapsed - last_save_try >= 300 )); then
       last_save_try=$elapsed
       save_checkpoint || aios_warn "Checkpoint toujours non publié : nouvelle tentative dans 5 min (le service continue)."
@@ -132,7 +139,8 @@ save_checkpoint() {
   # génération, et réécrire la branche désynchroniserait le téléchargement
   # en cours du successeur.
   [[ "$(state_read saved)" == "1" ]] && return 0
-  aios_guest_ssh sshopts 60 'sudo sync' || true
+  # Préparation invité : tout sur le disque + espace libre rendu au fichier.
+  aios_guest_ssh sshopts 90 'sudo sync; sudo fstrim -av 2>/dev/null; sudo apt-get clean 2>/dev/null; sudo journalctl --vacuum-size=100M 2>/dev/null; true' || true
   local attempt
   for attempt in 1 2 3 4; do
     if bash "$AIOS_REPO_ROOT/scripts/aios-data.sh" save "$AIOS_WORK_DIR/disk.img" "${GITHUB_RUN_ID:?}"; then
@@ -307,8 +315,10 @@ produce)
   duration="$AIOS_PRODUCE_SECONDS"
   [[ "${TEST_RELAY:-false}" == true ]] && duration=40 && aios_log "Mode test : production ramenée à ${duration}s."
   job_start=$(state_read job-start); now=$(date +%s)
-  if (( job_start + AIOS_JOB_BUDGET_SECONDS < now + duration + AIOS_OVERLAP_SECONDS + 1200 )); then
-    aios_warn "Le cycle complet dépassera 6 h : la sauvegarde risque d'être coupée."
+  budget_left=$(( job_start + AIOS_JOB_BUDGET_SECONDS - now - AIOS_OVERLAP_SECONDS - 1500 ))
+  if (( duration > budget_left )); then
+    aios_warn "Production ramenée à $(( budget_left / 60 )) min : marge de sauvegarde préservée (limite 6 h du job)."
+    duration=$(( budget_left > 600 ? budget_left : 600 ))
   fi
   aios_log "PHASE DE PRODUCTION : $((duration / 60)) min d'utilisation à partir de maintenant."
   monitor_loop "$duration" "production"
@@ -317,6 +327,10 @@ produce)
 dispatch)
   aios_require_env GH_TOKEN
   [[ -n "${GITHUB_RUN_ID:-}" ]] || aios_die "GITHUB_RUN_ID absent."
+  # SAUVEGARDE AVANT le dispatch : le job peut être tué à tout moment après
+  # (limite de 6 h du runner) — le checkpoint doit DÉJÀ être publié.
+  aios_log "Sauvegarde du checkpoint AVANT le dispatch du successeur..."
+  save_checkpoint || aios_warn "Checkpoint non publié avant dispatch : le chevauchement retentera."
   json=$(printf '{"ref":"main","inputs":{"predecessor_run_id":"%s"}}' "$GITHUB_RUN_ID")
   done_dispatch=0
   for attempt in 1 2 3 4 5; do

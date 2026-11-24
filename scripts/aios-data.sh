@@ -29,10 +29,10 @@ action=${1:?missing action}; disk=${2:?missing disk}; checkpoint=${3:-}
 
 if [[ "$action" == save ]]; then
   [[ -f "$disk" && -n "$checkpoint" ]] || aios_die 'Disque ou checkpoint manquant'
-  # L'appelant DOIT avoir arrêté QEMU : un disque vivant n'est pas un checkpoint.
-  qemu-img check "$disk" || aios_warn "Contrôle qcow2 : anomalies signalées (la copie peut être à chaud) ; la vérification finale du restore fera foi."
-  # Garde-fou disque : la sauvegarde triple l'empreinte (chiffré + fragments +
-  # objets git). Sans marge, la publication meurt au milieu avec "No space left".
+  # Copie à CHAUD autorisée (l'appelant fait un sync invité au préalable) :
+  # le journal ext4 fait foi, la vérification finale du restore arbitre.
+  # Garde-fou disque : la sauvegarde triple l'empreinte (compacté + chiffré +
+  # fragments + objets git).
   free_kb=$(df -Pk "$work" | awk 'NR==2 {print $4}')
   if (( free_kb < AIOS_MIN_FREE_KB )); then
     aios_die "Espace disque insuffisant : ${free_kb} Ko libres, ${AIOS_MIN_FREE_KB} Ko requis."
@@ -40,17 +40,37 @@ if [[ "$action" == save ]]; then
   mkdir "$work/repo"; cd "$work/repo"; git init -q; git checkout -q --orphan "$AIOS_DATA_BRANCH"
   git config user.name 'AI OS backup'; git config user.email 'ai-os@users.noreply.github.com'
   printf '%s' "$AIOS_BACKUP_KEY" > "$work/pass"; chmod 600 "$work/pass"
+  # 1. COMPACTION : seules les données utilisées sont réécrites (sparse).
+  #    Indispensable : GitHub rejette les gros pushes (RPC failed / HTTP 500 —
+  #    la cause exacte des checkpoints perdus depuis que le disque a grossi).
+  aios_log 'Compaction du disque (espace libre récupéré)...'
+  qemu-img convert -p -O qcow2 -S 4k "$disk" "$work/disk.compact.img"
+  # 2. Compression + chiffrement.
   aios_log 'Compression et chiffrement du disque...'
-  gzip -1 -c "$disk" | gpg --batch --yes --pinentry-mode loopback --passphrase-file "$work/pass" --symmetric --cipher-algo AES256 --s2k-mode 3 --compress-algo none --output "$work/snapshot.gpg"
+  gzip -1 -c "$work/disk.compact.img" | gpg --batch --yes --pinentry-mode loopback --passphrase-file "$work/pass" --symmetric --cipher-algo AES256 --s2k-mode 3 --compress-algo none --output "$work/snapshot.gpg"
+  rm -f "$work/disk.compact.img"
   split -b 45m -d -a 4 "$work/snapshot.gpg" part-
   sha256sum part-* > SHA256SUMS
   printf '%s\n' "$checkpoint" > CHECKPOINT
   date -u '+%Y-%m-%dT%H:%M:%SZ' > CREATED_AT
-  git add part-* SHA256SUMS CHECKPOINT CREATED_AT
-  git -c core.hooksPath=/dev/null commit -qm 'Encrypted QEMU checkpoint'
   git remote add origin "$remote"
+  # 3. Publication en PLUSIEURS poussées modestes (~360 Mo) : jamais un gros
+  #    push. Le commit final (marqueurs) n'est poussé qu'en DERNIER.
+  parts=(part-*)
+  i=0; batch=()
+  for pch in "${parts[@]}"; do
+    batch+=("$pch")
+    if (( ${#batch[@]} >= 8 )); then
+      git add "${batch[@]}"
+      git -c core.hooksPath=/dev/null commit -qm "fragments $i"
+      git -c core.hooksPath=/dev/null push --force origin "HEAD:refs/heads/$AIOS_DATA_BRANCH"
+      batch=(); i=$((i + 1))
+    fi
+  done
+  git add ${batch[@]+"${batch[@]}"} SHA256SUMS CHECKPOINT CREATED_AT
+  git -c core.hooksPath=/dev/null commit -qm 'Encrypted QEMU checkpoint'
   git -c core.hooksPath=/dev/null push --force origin "HEAD:refs/heads/$AIOS_DATA_BRANCH"
-  aios_log "Checkpoint $checkpoint publié ($(du -ch part-* | tail -1 | cut -f1), $(ls part-* | wc -l) fragments)."
+  aios_log "Checkpoint $checkpoint publié ($(du -ch part-* | tail -1 | cut -f1), $(ls part-* | wc -l) fragments, $((i + 1)) poussées)."
 elif [[ "$action" == restore ]]; then
   [[ -n "$checkpoint" ]] || aios_die 'Checkpoint attendu manquant'
   git clone --quiet --depth 1 --single-branch --branch "$AIOS_DATA_BRANCH" "$remote" "$work/repo"
